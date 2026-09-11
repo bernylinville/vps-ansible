@@ -94,7 +94,7 @@ cd vps-ansible
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-ansible-galaxy collection install -r collections/requirements.yml
+ansible-galaxy install -r requirements.yml
 
 # 配置 Vault 密码
 echo "your-vault-password" > .vault-password

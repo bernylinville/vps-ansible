@@ -10,6 +10,7 @@ exclude_paths:
   - roles/geerlingguy.security/
   - molecule/default/render_traefik.yml
   - molecule/default/render_vaultwarden.yml
+  - molecule/default/render_sub2api.yml
 
 # 使用最宽松的规则集，只检查基础问题
 profile: min

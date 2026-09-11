@@ -18,7 +18,7 @@ sub2api_container_name: sub2api
 sub2api_postgres_container_name: sub2api-postgres
 sub2api_redis_container_name: sub2api-redis
 
-sub2api_hostname: "sub2api.{{ domain_name | default('example.com', true) }}"
+sub2api_hostname: "api.{{ domain_name | default('example.com', true) }}"
 sub2api_network_name: "{{ docker_custom_network_name }}"
 
 # 应用配置

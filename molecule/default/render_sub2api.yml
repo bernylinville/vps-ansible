@@ -1,0 +1,32 @@
+---
+- name: Render Sub2API configuration for molecule verify
+  hosts: all
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Load Sub2API role defaults
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/../../roles/sub2api/defaults/main.yml"
+
+    - name: Create sub2api stack directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0700"
+      loop:
+        - /opt/stacks/sub2api
+        - /opt/stacks/sub2api/data
+        - /opt/stacks/sub2api/postgres
+        - /opt/stacks/sub2api/redis
+
+    - name: Render sub2api environment file
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../../roles/sub2api/templates/.env.j2"
+        dest: /opt/stacks/sub2api/.env
+        mode: "0600"
+
+    - name: Render sub2api compose file
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../../roles/sub2api/templates/compose.yml.j2"
+        dest: /opt/stacks/sub2api/compose.yml
+        mode: "0644"

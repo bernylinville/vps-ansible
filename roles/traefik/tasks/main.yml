@@ -10,10 +10,11 @@
     - "{{ traefik_dynamic_config_dir }}"
 
 - name: Create ACME storage file
-  ansible.builtin.file:
-    path: "{{ traefik_acme_path }}"
-    state: touch
+  ansible.builtin.copy:
+    content: ""
+    dest: "{{ traefik_acme_path }}"
     mode: "0600"
+    force: false
 
 - name: Render Traefik environment file
   ansible.builtin.template:

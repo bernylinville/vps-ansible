@@ -66,10 +66,6 @@
       ansible.builtin.command: dpkg -l docker-compose-plugin
       changed_when: false
 
-    - name: Verify proxy_net does not exist in molecule
-      ansible.builtin.debug:
-        msg: "Docker network tests skipped in molecule container"
-
     - name: Verify ntpsec is installed and running
       ansible.builtin.service:
         name: ntpsec
@@ -85,3 +81,7 @@
     - name: Verify SSH is configured
       ansible.builtin.command: grep -q "PasswordAuthentication no" /etc/ssh/sshd_config
       changed_when: false
+
+- import_playbook: render_traefik.yml
+- import_playbook: render_vaultwarden.yml
+- import_playbook: render_sub2api.yml

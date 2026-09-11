@@ -57,7 +57,7 @@ sub2api_enabled: true
 sub2api_image_tag: "0.2.4"
 sub2api_postgres_image_tag: "18.6-trixie"
 sub2api_redis_image_tag: "8.10.1-trixie"
-sub2api_hostname: "sub2api.{{ domain_name }}"
+sub2api_hostname: "api.{{ domain_name }}"
 
 # Vaultwarden 配置
 vaultwarden_enabled: true

@@ -3,7 +3,7 @@ driver:
   name: docker
 platforms:
   - name: vps-test
-    image: "cisagov/docker-debian13-ansible:latest"
+    image: "geerlingguy/docker-debian13-ansible:latest"
     command: ""
     volumes:
       - /sys/fs/cgroup:/sys/fs/cgroup:rw
@@ -11,8 +11,8 @@ platforms:
     privileged: true
     pre_build_image: true
     published_ports:
-      - "8080:80"
-      - "8443:443"
+      - "18080:80"
+      - "18443:443"
     groups:
       - vps
 provisioner:
@@ -34,10 +34,11 @@ provisioner:
         ansible_port: "22"
         domain_name: "localhost"
         vault_traefik_cloudflare_dns_api_token: "test-token"
+        vault_traefik_dashboard_auth_password_hash: "$$2b$$04$$q0aZye//9OQ3DUBBZD/speSW6YZCQMbTIopUnG3DmUPGDJ2wjTUH2"
         vault_vaultwarden_admin_token: "test-token"
         traefik_cloudflare_dns_api_token: "test-token"
         traefik_image: traefik
-        traefik_image_tag: v3.6.10
+        traefik_image_tag: v3.7.13
         traefik_container_name: traefik
         traefik_acme_email: ""
         traefik_acme_ca_server: https://acme-v02.api.letsencrypt.org/directory
@@ -45,7 +46,7 @@ provisioner:
         traefik_log_level: INFO
         traefik_metrics_enabled: true
         vaultwarden_image: vaultwarden/server
-        vaultwarden_image_tag: "1.35.7"
+        vaultwarden_image_tag: "1.37.2"
         vaultwarden_container_name: vaultwarden
         vaultwarden_signups_allowed: false
         timezone: UTC
@@ -53,6 +54,10 @@ provisioner:
         vaultwarden_enabled: true
         traefik_image_pull_policy: never
         vaultwarden_image_pull_policy: never
+        vault_sub2api_postgres_password: "molecule-pg-pass-0123456789abcdef"
+        vault_sub2api_redis_password: "molecule-redis-pass-0123456789abcdef"
+        vault_sub2api_jwt_secret: "molecule-jwt-secret-0123456789abcdef"
+        vault_sub2api_totp_encryption_key: "molecule-totp-key-00123456789abcdef"
         docker_custom_network_name: proxy_net
         docker_custom_network_subnet: "10.203.57.0/24"
         docker_custom_network_gateway: "10.203.57.1"
@@ -61,3 +66,14 @@ provisioner:
     verify: verify.yml
 verifier:
   name: ansible
+
+scenario:
+  # 依赖由 mise run deps 统一安装, 此处跳过 dependency 阶段
+  test_sequence:
+    - destroy
+    - syntax
+    - create
+    - converge
+    - idempotence
+    - verify
+    - destroy

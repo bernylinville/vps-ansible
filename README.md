@@ -95,8 +95,7 @@ mise run vault-edit
 │   ├── traefik/              # Traefik 反向代理
 │   ├── sub2api/              # Sub2API AI API 网关 (PostgreSQL + Redis)
 │   └── vaultwarden/          # Vaultwarden 密码库
-├── collections/requirements.yml  # Ansible 集合依赖
-├── requirements.yml          # Ansible 角色依赖 (已清空第三方 roles)
+├── requirements.yml          # Ansible 集合依赖
 ├── requirements.txt          # Python 依赖
 ├── ansible.cfg               # Ansible 配置
 └── docs/                     # 项目文档

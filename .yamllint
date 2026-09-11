@@ -31,3 +31,4 @@ ignore:
   - .molecule/
   - molecule/default/render_traefik.yml
   - molecule/default/render_vaultwarden.yml
+  - molecule/default/render_sub2api.yml

@@ -40,8 +40,7 @@ vps-ansible/
 │   ├── docker_custom/          # Docker 共享网络
 │   ├── traefik/                # Traefik 反向代理
 │   └── vaultwarden/            # Vaultwarden 密码库
-├── collections/requirements.yml  # Ansible 集合
-├── requirements.yml            # Ansible 角色 (geerlingguy.*)
+├── requirements.yml            # Ansible 集合依赖
 ├── requirements.txt            # Python 依赖
 ├── ansible.cfg                 # Ansible 配置
 ├── mise.toml                   # mise 开发环境配置

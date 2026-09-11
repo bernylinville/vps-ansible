@@ -33,7 +33,7 @@ Internet
 443 HTTPS ──→ Traefik (Docker)
                 │
                 ├── <YOUR_DOMAIN> → Vaultwarden
-                ├── sub2api.<YOUR_DOMAIN> → Sub2API (AI API 网关)
+                ├── api.<YOUR_DOMAIN> → Sub2API (AI API 网关)
                 ├── traefik.<YOUR_DOMAIN> → Traefik Dashboard (Basic Auth 保护)
                 └── *.<YOUR_DOMAIN> → (未来服务)
                 │
@@ -129,7 +129,7 @@ Internet
 3. **AI API 网关**：`sub2api`
    - 部署 Sub2API 0.2.4 (weishaw/sub2api) + PostgreSQL 18.6 + Redis 8.10
    - 三个容器全部接入 proxy_net，数据库/缓存不暴露任何端口
-   - 通过 Traefik 标签路由：`https://sub2api.<YOUR_DOMAIN>`
+   - 通过 Traefik 标签路由：`https://api.<YOUR_DOMAIN>`
    - 固定 JWT_SECRET / TOTP_ENCRYPTION_KEY / 数据库密码，Ansible Vault 管理
    - 数据持久化：`/opt/stacks/sub2api/{data,postgres,redis}`
 

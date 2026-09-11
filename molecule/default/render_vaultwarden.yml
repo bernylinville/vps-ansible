@@ -1,28 +1,30 @@
 ---
-- name: Load Vaultwarden role defaults
-  ansible.builtin.include_vars:
-    file: "{{ playbook_dir }}/../../roles/vaultwarden/defaults/main.yml"
-
-- name: Create Vaultwarden stack directories
-  ansible.builtin.file:
-    path: "{{ item }}"
-    state: directory
-    mode: "{{ '0700' if item == '/opt/stacks/vaultwarden' or item == '/opt/stacks/vaultwarden/data' else '0755' }}"
-  loop:
-    - /opt/stacks/vaultwarden
-    - /opt/stacks/vaultwarden/data
+- name: Render Vaultwarden configuration for molecule verify
+  hosts: all
+  gather_facts: false
   become: true
+  tasks:
+    - name: Load Vaultwarden role defaults
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/../../roles/vaultwarden/defaults/main.yml"
 
-- name: Render Vaultwarden environment file
-  ansible.builtin.template:
-    src: "{{ playbook_dir }}/../../roles/vaultwarden/templates/.env.j2"
-    dest: /opt/stacks/vaultwarden/.env
-    mode: "0600"
-  become: true
+    - name: Create Vaultwarden stack directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0700"
+      loop:
+        - /opt/stacks/vaultwarden
+        - /opt/stacks/vaultwarden/data
 
-- name: Render Vaultwarden compose file
-  ansible.builtin.template:
-    src: "{{ playbook_dir }}/../../roles/vaultwarden/templates/compose.yml.j2"
-    dest: /opt/stacks/vaultwarden/compose.yml
-    mode: "0644"
-  become: true
+    - name: Render Vaultwarden environment file
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../../roles/vaultwarden/templates/.env.j2"
+        dest: /opt/stacks/vaultwarden/.env
+        mode: "0600"
+
+    - name: Render Vaultwarden compose file
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../../roles/vaultwarden/templates/compose.yml.j2"
+        dest: /opt/stacks/vaultwarden/compose.yml
+        mode: "0644"

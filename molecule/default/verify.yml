@@ -52,53 +52,108 @@
       ansible.builtin.stat:
         path: /opt/stacks/traefik/compose.yml
       register: traefik_compose
-      ignore_errors: true
 
     - name: Verify Traefik env file was rendered
       ansible.builtin.stat:
         path: /opt/stacks/traefik/.env
       register: traefik_env
-      ignore_errors: true
 
     - name: Verify Traefik dynamic middlewares file was rendered
       ansible.builtin.stat:
         path: /opt/stacks/traefik/dynamic/middlewares.yml
       register: traefik_middlewares
-      ignore_errors: true
 
     - name: Verify Vaultwarden compose file was rendered
       ansible.builtin.stat:
         path: /opt/stacks/vaultwarden/compose.yml
       register: vaultwarden_compose
-      ignore_errors: true
 
     - name: Verify Vaultwarden env file was rendered
       ansible.builtin.stat:
         path: /opt/stacks/vaultwarden/.env
       register: vaultwarden_env
-      ignore_errors: true
 
-    - name: Validate Traefik compose syntax (if files and daemon available)
-      ansible.builtin.command: docker compose -f /opt/stacks/traefik/compose.yml config
+    - name: Verify Sub2API compose file was rendered
+      ansible.builtin.stat:
+        path: /opt/stacks/sub2api/compose.yml
+      register: sub2api_compose
+
+    - name: Verify Sub2API env file was rendered
+      ansible.builtin.stat:
+        path: /opt/stacks/sub2api/.env
+      register: sub2api_env
+
+    - name: Verify Sub2API data directories were created
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop:
+        - /opt/stacks/sub2api/data
+        - /opt/stacks/sub2api/postgres
+        - /opt/stacks/sub2api/redis
+      register: sub2api_dirs
+
+    # docker compose config 只做解析/插值校验, 不需要 daemon
+    - name: Validate Traefik compose syntax
+      ansible.builtin.command: docker compose -f /opt/stacks/traefik/compose.yml config --quiet
       changed_when: false
       register: traefik_config
       failed_when: false
-      when: >
-        docker_available.rc == 0 and
-        traefik_compose is defined and
-        traefik_compose.stat is defined and
-        traefik_compose.stat.exists | default(false)
+      when: traefik_compose.stat.exists | default(false)
 
-    - name: Validate Vaultwarden compose syntax (if files and daemon available)
-      ansible.builtin.command: docker compose -f /opt/stacks/vaultwarden/compose.yml config
+    - name: Validate Vaultwarden compose syntax
+      ansible.builtin.command: docker compose -f /opt/stacks/vaultwarden/compose.yml config --quiet
       changed_when: false
       register: vaultwarden_config
       failed_when: false
-      when: >
-        docker_available.rc == 0 and
-        vaultwarden_compose is defined and
-        vaultwarden_compose.stat is defined and
-        vaultwarden_compose.stat.exists | default(false)
+      when: vaultwarden_compose.stat.exists | default(false)
+
+    - name: Validate Sub2API compose syntax (incl. .env interpolation)
+      ansible.builtin.command: docker compose -f /opt/stacks/sub2api/compose.yml config --quiet
+      changed_when: false
+      register: sub2api_config
+      failed_when: false
+      when: sub2api_compose.stat.exists | default(false)
+
+    - name: Assert all rendered files exist
+      ansible.builtin.assert:
+        that:
+          - traefik_compose.stat.exists | default(false)
+          - traefik_env.stat.exists | default(false)
+          - traefik_middlewares.stat.exists | default(false)
+          - vaultwarden_compose.stat.exists | default(false)
+          - vaultwarden_env.stat.exists | default(false)
+          - sub2api_compose.stat.exists | default(false)
+          - sub2api_env.stat.exists | default(false)
+        fail_msg: "rendered stack files missing under /opt/stacks/"
+
+    - name: Assert sub2api data directories exist with 0700
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists and item.stat.mode == '0700'
+        fail_msg: "{{ item.item }} missing or wrong mode"
+      loop: "{{ sub2api_dirs.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Assert rendered compose files are valid
+      ansible.builtin.assert:
+        that:
+          - (traefik_config.rc | default(1)) == 0
+          - (vaultwarden_config.rc | default(1)) == 0
+          - (sub2api_config.rc | default(1)) == 0
+        fail_msg: "docker compose config validation failed"
+
+    - name: Get resolved sub2api compose config
+      ansible.builtin.command: docker compose -f /opt/stacks/sub2api/compose.yml config --format json
+      changed_when: false
+      register: sub2api_json
+
+    - name: Assert sub2api publishes no host ports
+      ansible.builtin.assert:
+        that:
+          - (sub2api_json.stdout | from_json)['services'].values()
+            | selectattr('ports', 'defined') | list | length == 0
+        fail_msg: "sub2api compose must not publish any host ports"
 
     - name: Show test results
       ansible.builtin.debug:
@@ -112,5 +167,8 @@
           - "Traefik middlewares: {{ 'EXISTS' if traefik_middlewares.stat.exists else 'MISSING' }}"
           - "Vaultwarden compose: {{ 'EXISTS' if vaultwarden_compose.stat.exists else 'MISSING' }}"
           - "Vaultwarden env: {{ 'EXISTS' if vaultwarden_env.stat.exists else 'MISSING' }}"
-          - "Traefik config valid: {{ 'YES' if (traefik_config.rc | default(0)) == 0 else 'NO/SKIPPED' }}"
-          - "Vaultwarden config valid: {{ 'YES' if (vaultwarden_config.rc | default(0)) == 0 else 'NO/SKIPPED' }}"
+          - "Sub2API compose: {{ 'EXISTS' if sub2api_compose.stat.exists else 'MISSING' }}"
+          - "Sub2API env: {{ 'EXISTS' if sub2api_env.stat.exists else 'MISSING' }}"
+          - "Traefik config valid: {{ 'YES' if (traefik_config.rc | default(1)) == 0 else 'NO/SKIPPED' }}"
+          - "Vaultwarden config valid: {{ 'YES' if (vaultwarden_config.rc | default(1)) == 0 else 'NO/SKIPPED' }}"
+          - "Sub2API config valid: {{ 'YES' if (sub2api_config.rc | default(1)) == 0 else 'NO/SKIPPED' }}"

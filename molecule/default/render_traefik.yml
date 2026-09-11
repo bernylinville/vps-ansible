@@ -1,43 +1,44 @@
 ---
-- name: Load Traefik role defaults
-  ansible.builtin.include_vars:
-    file: "{{ playbook_dir }}/../../roles/traefik/defaults/main.yml"
-
-- name: Create Traefik stack directories
-  ansible.builtin.file:
-    path: "{{ item }}"
-    state: directory
-    mode: "0700"
-  loop:
-    - /opt/stacks/traefik
-    - /opt/stacks/traefik/letsencrypt
-    - /opt/stacks/traefik/dynamic
+- name: Render Traefik configuration for molecule verify
+  hosts: all
+  gather_facts: false
   become: true
+  tasks:
+    - name: Load Traefik role defaults
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/../../roles/traefik/defaults/main.yml"
 
-- name: Create ACME storage file
-  ansible.builtin.file:
-    path: /opt/stacks/traefik/letsencrypt/acme.json
-    state: touch
-    mode: "0600"
-  become: true
+    - name: Create Traefik stack directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0700"
+      loop:
+        - /opt/stacks/traefik
+        - /opt/stacks/traefik/letsencrypt
+        - /opt/stacks/traefik/dynamic
 
-- name: Render Traefik environment file
-  ansible.builtin.template:
-    src: "{{ playbook_dir }}/../../roles/traefik/templates/.env.j2"
-    dest: /opt/stacks/traefik/.env
-    mode: "0600"
-  become: true
+    - name: Create ACME storage file
+      ansible.builtin.copy:
+        content: ""
+        dest: /opt/stacks/traefik/letsencrypt/acme.json
+        mode: "0600"
+        force: false
 
-- name: Render Traefik dynamic middlewares file
-  ansible.builtin.template:
-    src: "{{ playbook_dir }}/../../roles/traefik/templates/middlewares.yml.j2"
-    dest: /opt/stacks/traefik/dynamic/middlewares.yml
-    mode: "0600"
-  become: true
+    - name: Render Traefik environment file
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../../roles/traefik/templates/.env.j2"
+        dest: /opt/stacks/traefik/.env
+        mode: "0600"
 
-- name: Render Traefik compose file
-  ansible.builtin.template:
-    src: "{{ playbook_dir }}/../../roles/traefik/templates/compose.yml.j2"
-    dest: /opt/stacks/traefik/compose.yml
-    mode: "0644"
-  become: true
+    - name: Render Traefik dynamic middlewares file
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../../roles/traefik/templates/middlewares.yml.j2"
+        dest: /opt/stacks/traefik/dynamic/middlewares.yml
+        mode: "0600"
+
+    - name: Render Traefik compose file
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../../roles/traefik/templates/compose.yml.j2"
+        dest: /opt/stacks/traefik/compose.yml
+        mode: "0644"
