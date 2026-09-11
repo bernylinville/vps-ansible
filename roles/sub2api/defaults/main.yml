@@ -31,6 +31,14 @@ sub2api_jwt_expire_hour: 24
 # 生产环境禁用明文 http:// 上游 (上游默认 true，.env.example 建议生产设 false)
 sub2api_allow_insecure_http: "false"
 
+# OpenAI WS mode router v2: 账号级 WS mode (如 http_bridge) 需开启后才生效
+# https://github.com/Wei-Shaw/sub2api backend/internal/config/config.go
+sub2api_gateway_openai_ws_mode_router_v2_enabled: "true"
+# 账号未显式设置 WS mode 时的默认 ingress 模式: off|ctx_pool|passthrough|http_bridge
+sub2api_gateway_openai_ws_ingress_mode_default: "http_bridge"
+# 信任的反向代理网段 (Traefik 所在 proxy_net), 用于解析真实客户端 IP (usage logs / API Key IP ACL)
+sub2api_trusted_proxies: "{{ docker_custom_network_subnet | default('10.203.57.0/24', true) }}"
+
 # Secrets (Ansible Vault，生成: openssl rand -hex 32)
 sub2api_postgres_password: "{{ vault_sub2api_postgres_password }}"
 sub2api_redis_password: "{{ vault_sub2api_redis_password }}"

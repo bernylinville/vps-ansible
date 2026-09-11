@@ -25,6 +25,7 @@ services:
       - --entrypoints.web.http.redirections.entryPoint.to=websecure
       - --entrypoints.web.http.redirections.entryPoint.scheme=https
       - --entrypoints.websecure.address=:443
+      - --entrypoints.websecure.transport.respondingTimeouts.readTimeout={{ traefik_websecure_read_timeout }}
       - --entrypoints.traefik.address=:8080
       - --certificatesresolvers.letsencrypt.acme.email={{ traefik_acme_email }}
       - --certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json

@@ -23,3 +23,5 @@ traefik_dashboard_auth_users:
   - "{{ traefik_dashboard_auth_user }}:{{ traefik_dashboard_auth_password_hash }}"
 traefik_log_level: INFO
 traefik_metrics_enabled: true
+# 读取完整请求(含 body)的超时; 默认 60s 对 AI 网关的大请求体不够, 官方建议按需调大
+traefik_websecure_read_timeout: 300s
