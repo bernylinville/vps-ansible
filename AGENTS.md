@@ -90,7 +90,6 @@ chore: <maintenance task>       # 维护任务
 1. **绝不提交明文密码**：所有敏感数据必须存放在 `vault.yml` 中并使用 Ansible Vault 加密
 2. **SSH 密钥不进入仓库**：通过 GitHub Actions Secrets 注入
 3. **Vault 密码文件在 .gitignore 中**：`.vault-password` 和 `.sudo-password` 不得提交
-4. **host_key_checking = True**：生产环境保持 SSH 主机密钥检查
 
 ### 部署流程
 
