@@ -1,0 +1,45 @@
+---
+- name: Install ntpsec and dependencies
+  ansible.builtin.apt:
+    name:
+      - ntpsec
+      - tzdata
+      - util-linux
+    state: present
+
+- name: Set timezone
+  ansible.builtin.file:
+    src: "/usr/share/zoneinfo/{{ ntp_timezone }}"
+    dest: /etc/localtime
+    state: link
+    force: true
+  notify: restart cron
+
+- name: Disable systemd-timesyncd
+  ansible.builtin.service:
+    name: systemd-timesyncd
+    enabled: false
+    state: stopped
+  ignore_errors: true
+
+- name: Configure ntpsec
+  ansible.builtin.template:
+    src: ntpsec.conf.j2
+    dest: /etc/ntpsec/ntp.conf
+    mode: "0644"
+  notify: restart ntpsec
+  when: ntp_manage_config | bool
+
+- name: Ensure ntpsec is running
+  ansible.builtin.service:
+    name: ntpsec
+    state: started
+    enabled: true
+  when: ntp_enabled | bool
+
+- name: Ensure ntpsec is stopped
+  ansible.builtin.service:
+    name: ntpsec
+    state: stopped
+    enabled: false
+  when: not (ntp_enabled | bool)

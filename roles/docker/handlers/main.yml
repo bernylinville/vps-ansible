@@ -1,0 +1,10 @@
+---
+- name: restart docker
+  ansible.builtin.service:
+    name: docker
+    state: restarted
+  when: docker_service_manage | bool
+
+- name: apt update
+  ansible.builtin.apt:
+    update_cache: true

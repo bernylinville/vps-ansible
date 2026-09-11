@@ -1,0 +1,61 @@
+services:
+  traefik:
+    image: "{{ traefik_image }}:{{ traefik_image_tag }}"
+    container_name: "{{ traefik_container_name }}"
+    restart: unless-stopped
+    env_file:
+      - "{{ traefik_env_path }}"
+    command:
+      - --global.sendanonymoususage=false
+      - --global.checknewversion=false
+      - --api=true
+      - --api.dashboard=true
+      - --api.insecure=false
+      - --ping=true
+      - --ping.entrypoint=traefik
+      - --log.level={{ traefik_log_level }}
+      - --log.format=common
+      - --providers.docker=true
+      - --providers.docker.endpoint=unix:///var/run/docker.sock
+      - --providers.docker.exposedbydefault=false
+      - --providers.docker.network={{ traefik_network_name }}
+      - --providers.file.directory=/dynamic
+      - --providers.file.watch=true
+      - --entrypoints.web.address=:80
+      - --entrypoints.web.http.redirections.entryPoint.to=websecure
+      - --entrypoints.web.http.redirections.entryPoint.scheme=https
+      - --entrypoints.websecure.address=:443
+      - --entrypoints.traefik.address=:8080
+      - --certificatesresolvers.letsencrypt.acme.email={{ traefik_acme_email }}
+      - --certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json
+      - --certificatesresolvers.letsencrypt.acme.dnschallenge=true
+      - --certificatesresolvers.letsencrypt.acme.dnschallenge.provider={{ traefik_dns_challenge_provider }}
+      - --certificatesresolvers.letsencrypt.acme.caserver={{ traefik_acme_ca_server }}
+      - --metrics.prometheus={{ 'true' if traefik_metrics_enabled | bool else 'false' }}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - "{{ traefik_letsencrypt_dir }}:/letsencrypt"
+      - "{{ traefik_dynamic_config_dir }}:/dynamic:ro"
+    networks:
+      - "{{ traefik_network_name }}"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8080/ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: "{{ traefik_network_name }}"
+      traefik.http.routers.traefik-dashboard.rule: 'Host("{{ traefik_dashboard_domain }}")'
+      traefik.http.routers.traefik-dashboard.entrypoints: "websecure"
+      traefik.http.routers.traefik-dashboard.tls.certresolver: "letsencrypt"
+      traefik.http.routers.traefik-dashboard.service: "api@internal"
+      traefik.http.routers.traefik-dashboard.middlewares: "{{ traefik_dashboard_auth_middleware_name }}@file"
+
+networks:
+  {{ traefik_network_name }}:
+    external: true
+    name: "{{ traefik_network_name }}"

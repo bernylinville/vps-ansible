@@ -1,0 +1,116 @@
+---
+- name: Verify
+  hosts: all
+  gather_facts: true
+  tasks:
+    - name: Check if Docker daemon is available
+      ansible.builtin.command: docker ps
+      changed_when: false
+      register: docker_available
+      failed_when: false
+
+    - name: Check Docker CLI is installed
+      ansible.builtin.command: docker --version
+      changed_when: false
+      register: docker_version
+      failed_when: false
+
+    - name: Assert Docker CLI is installed
+      ansible.builtin.assert:
+        that:
+          - docker_version.rc == 0
+        fail_msg: "Docker CLI is not installed"
+      when: docker_version.rc is defined
+
+    - name: Check Docker Compose plugin
+      ansible.builtin.command: docker compose version
+      changed_when: false
+      register: compose_version
+      failed_when: false
+
+    - name: Assert Docker Compose is installed
+      ansible.builtin.assert:
+        that:
+          - compose_version.rc == 0
+        fail_msg: "Docker Compose plugin is not installed"
+      when: compose_version.rc is defined
+
+    - name: Check proxy_net exists (only if Docker daemon is available)
+      ansible.builtin.command: docker network ls --filter name=proxy_net --format "{{'{{'}}.Name{{'}}'}}"
+      changed_when: false
+      register: proxy_net
+      when: docker_available.rc == 0
+
+    - name: Assert proxy_net exists
+      ansible.builtin.assert:
+        that:
+          - "'proxy_net' in proxy_net.stdout"
+        fail_msg: "proxy_net Docker network does not exist"
+      when: docker_available.rc == 0 and proxy_net.stdout is defined
+
+    - name: Verify Traefik compose file was rendered
+      ansible.builtin.stat:
+        path: /opt/stacks/traefik/compose.yml
+      register: traefik_compose
+      ignore_errors: true
+
+    - name: Verify Traefik env file was rendered
+      ansible.builtin.stat:
+        path: /opt/stacks/traefik/.env
+      register: traefik_env
+      ignore_errors: true
+
+    - name: Verify Traefik dynamic middlewares file was rendered
+      ansible.builtin.stat:
+        path: /opt/stacks/traefik/dynamic/middlewares.yml
+      register: traefik_middlewares
+      ignore_errors: true
+
+    - name: Verify Vaultwarden compose file was rendered
+      ansible.builtin.stat:
+        path: /opt/stacks/vaultwarden/compose.yml
+      register: vaultwarden_compose
+      ignore_errors: true
+
+    - name: Verify Vaultwarden env file was rendered
+      ansible.builtin.stat:
+        path: /opt/stacks/vaultwarden/.env
+      register: vaultwarden_env
+      ignore_errors: true
+
+    - name: Validate Traefik compose syntax (if files and daemon available)
+      ansible.builtin.command: docker compose -f /opt/stacks/traefik/compose.yml config
+      changed_when: false
+      register: traefik_config
+      failed_when: false
+      when: >
+        docker_available.rc == 0 and
+        traefik_compose is defined and
+        traefik_compose.stat is defined and
+        traefik_compose.stat.exists | default(false)
+
+    - name: Validate Vaultwarden compose syntax (if files and daemon available)
+      ansible.builtin.command: docker compose -f /opt/stacks/vaultwarden/compose.yml config
+      changed_when: false
+      register: vaultwarden_config
+      failed_when: false
+      when: >
+        docker_available.rc == 0 and
+        vaultwarden_compose is defined and
+        vaultwarden_compose.stat is defined and
+        vaultwarden_compose.stat.exists | default(false)
+
+    - name: Show test results
+      ansible.builtin.debug:
+        msg:
+          - "Docker CLI: {{ docker_version.stdout | default('NOT INSTALLED') }}"
+          - "Compose: {{ compose_version.stdout | default('NOT INSTALLED') }}"
+          - "Docker daemon: {{ 'AVAILABLE' if docker_available.rc == 0 else 'NOT AVAILABLE' }}"
+          - "proxy_net: {{ proxy_net.stdout | default('SKIPPED (no daemon)') }}"
+          - "Traefik compose: {{ 'EXISTS' if traefik_compose.stat.exists else 'MISSING' }}"
+          - "Traefik env: {{ 'EXISTS' if traefik_env.stat.exists else 'MISSING' }}"
+          - "Traefik middlewares: {{ 'EXISTS' if traefik_middlewares.stat.exists else 'MISSING' }}"
+          - "Vaultwarden compose: {{ 'EXISTS' if vaultwarden_compose.stat.exists else 'MISSING' }}"
+          - "Vaultwarden env: {{ 'EXISTS' if vaultwarden_env.stat.exists else 'MISSING' }}"
+          - "Traefik config valid: {{ 'YES' if (traefik_config.rc | default(0)) == 0 else 'NO/SKIPPED' }}"
+          - "Vaultwarden config valid: {{ 'YES' if (vaultwarden_config.rc | default(0)) == 0 else 'NO/SKIPPED' }}"

@@ -1,0 +1,31 @@
+---
+- name: Create sub2api stack directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0700"
+  loop:
+    - "{{ sub2api_stack_dir }}"
+    - "{{ sub2api_data_dir }}"
+    - "{{ sub2api_postgres_data_dir }}"
+    - "{{ sub2api_redis_data_dir }}"
+
+- name: Render sub2api environment file
+  ansible.builtin.template:
+    src: .env.j2
+    dest: "{{ sub2api_env_path }}"
+    mode: "0600"
+
+- name: Render sub2api compose file
+  ansible.builtin.template:
+    src: compose.yml.j2
+    dest: "{{ sub2api_compose_path }}"
+    mode: "0644"
+
+- name: Start sub2api stack
+  community.docker.docker_compose_v2:
+    project_src: "{{ sub2api_stack_dir }}"
+    files:
+      - "{{ sub2api_compose_path }}"
+    state: present
+    pull: "{{ sub2api_image_pull_policy }}"

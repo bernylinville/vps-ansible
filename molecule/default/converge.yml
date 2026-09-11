@@ -1,0 +1,87 @@
+---
+- name: Converge
+  hosts: all
+  gather_facts: false
+
+  pre_tasks:
+    - name: Bootstrap python if needed
+      ansible.builtin.raw: test -e /usr/bin/python3 || (apt-get update && apt-get install -y python3 python3-apt)
+      changed_when: false
+      become: true
+
+    - name: Gather facts
+      ansible.builtin.setup:
+
+    - name: Install Docker python dependencies
+      ansible.builtin.apt:
+        name:
+          - python3-docker
+          - python3-requests
+        state: present
+        update_cache: true
+      become: true
+
+    - name: Ensure systemd is running
+      ansible.builtin.command: systemctl is-system-running
+      register: systemd_status
+      changed_when: false
+      failed_when: false
+      become: true
+
+    - name: Install SSH server for testing
+      ansible.builtin.apt:
+        name: openssh-server
+        state: present
+      become: true
+
+    - name: Ensure Docker config directory exists
+      ansible.builtin.file:
+        path: /etc/docker
+        state: directory
+        mode: "0755"
+      become: true
+
+  roles:
+    - role: ntp
+      become: true
+      tags: [ntp]
+    - role: security
+      become: true
+      tags: [security]
+    - role: docker
+      become: true
+      tags: [docker]
+      vars:
+        docker_service_manage: false
+        docker_daemon_options:
+          storage-driver: vfs
+
+
+  post_tasks:
+    - name: Verify Docker packages are installed
+      ansible.builtin.command: dpkg -l docker-ce
+      changed_when: false
+
+    - name: Verify Docker Compose plugin is installed
+      ansible.builtin.command: dpkg -l docker-compose-plugin
+      changed_when: false
+
+    - name: Verify proxy_net does not exist in molecule
+      ansible.builtin.debug:
+        msg: "Docker network tests skipped in molecule container"
+
+    - name: Verify ntpsec is installed and running
+      ansible.builtin.service:
+        name: ntpsec
+        state: started
+      changed_when: false
+
+    - name: Verify fail2ban is installed and running
+      ansible.builtin.service:
+        name: fail2ban
+        state: started
+      changed_when: false
+
+    - name: Verify SSH is configured
+      ansible.builtin.command: grep -q "PasswordAuthentication no" /etc/ssh/sshd_config
+      changed_when: false

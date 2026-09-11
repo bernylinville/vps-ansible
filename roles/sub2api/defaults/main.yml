@@ -1,0 +1,42 @@
+---
+sub2api_stack_dir: /opt/stacks/sub2api
+sub2api_env_path: "{{ sub2api_stack_dir }}/.env"
+sub2api_compose_path: "{{ sub2api_stack_dir }}/compose.yml"
+sub2api_data_dir: "{{ sub2api_stack_dir }}/data"
+sub2api_postgres_data_dir: "{{ sub2api_stack_dir }}/postgres"
+sub2api_redis_data_dir: "{{ sub2api_stack_dir }}/redis"
+
+# 镜像版本 (禁止 latest)
+sub2api_image: weishaw/sub2api
+sub2api_image_tag: "0.2.4"
+sub2api_postgres_image: postgres
+sub2api_postgres_image_tag: "18.6-trixie"
+sub2api_redis_image: redis
+sub2api_redis_image_tag: "8.10.1-trixie"
+
+sub2api_container_name: sub2api
+sub2api_postgres_container_name: sub2api-postgres
+sub2api_redis_container_name: sub2api-redis
+
+sub2api_hostname: "sub2api.{{ domain_name | default('example.com', true) }}"
+sub2api_network_name: "{{ docker_custom_network_name }}"
+
+# 应用配置
+sub2api_server_mode: release
+sub2api_tz: "{{ timezone | default('UTC', true) }}"
+sub2api_postgres_user: sub2api
+sub2api_postgres_db: sub2api
+sub2api_admin_email: "{{ vault_sub2api_admin_email | default('admin@sub2api.local', true) }}"
+sub2api_jwt_expire_hour: 24
+# 生产环境禁用明文 http:// 上游 (上游默认 true，.env.example 建议生产设 false)
+sub2api_allow_insecure_http: "false"
+
+# Secrets (Ansible Vault，生成: openssl rand -hex 32)
+sub2api_postgres_password: "{{ vault_sub2api_postgres_password }}"
+sub2api_redis_password: "{{ vault_sub2api_redis_password }}"
+sub2api_jwt_secret: "{{ vault_sub2api_jwt_secret }}"
+sub2api_totp_encryption_key: "{{ vault_sub2api_totp_encryption_key }}"
+# 留空则首次启动自动生成并打印在容器日志中
+sub2api_admin_password: "{{ vault_sub2api_admin_password | default('', true) }}"
+
+sub2api_image_pull_policy: always

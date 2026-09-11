@@ -1,0 +1,13 @@
+---
+vaultwarden_stack_dir: /opt/stacks/vaultwarden
+vaultwarden_env_path: "{{ vaultwarden_stack_dir }}/.env"
+vaultwarden_compose_path: "{{ vaultwarden_stack_dir }}/compose.yml"
+vaultwarden_data_dir: "{{ vaultwarden_stack_dir }}/data"
+vaultwarden_image: vaultwarden/server
+vaultwarden_image_tag: "1.35.7"
+vaultwarden_container_name: vaultwarden
+vaultwarden_hostname: "vault.{{ domain_name | default('example.com', true) }}"
+vaultwarden_signups_allowed: false
+vaultwarden_admin_token: "{{ vault_vaultwarden_admin_token }}"
+vaultwarden_domain: "https://{{ vaultwarden_hostname }}"
+vaultwarden_network_name: "{{ docker_custom_network_name }}"

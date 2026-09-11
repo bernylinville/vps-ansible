@@ -1,0 +1,25 @@
+---
+traefik_stack_dir: /opt/stacks/traefik
+traefik_env_path: "{{ traefik_stack_dir }}/.env"
+traefik_compose_path: "{{ traefik_stack_dir }}/compose.yml"
+traefik_letsencrypt_dir: "{{ traefik_stack_dir }}/letsencrypt"
+traefik_acme_path: "{{ traefik_letsencrypt_dir }}/acme.json"
+traefik_image: traefik
+traefik_image_tag: v3.6.10
+traefik_container_name: traefik
+traefik_acme_email: ""
+traefik_acme_ca_server: https://acme-v02.api.letsencrypt.org/directory
+traefik_dns_challenge_provider: cloudflare
+traefik_cloudflare_dns_api_token: "{{ vault_traefik_cloudflare_dns_api_token }}"
+traefik_domain: "{{ domain_name | default('example.com', true) }}"
+traefik_dashboard_domain: "traefik.{{ traefik_domain }}"
+traefik_network_name: "{{ docker_custom_network_name }}"
+traefik_dynamic_config_dir: "{{ traefik_stack_dir }}/dynamic"
+traefik_middlewares_path: "{{ traefik_dynamic_config_dir }}/middlewares.yml"
+traefik_dashboard_auth_middleware_name: auth
+traefik_dashboard_auth_user: "{{ vault_traefik_dashboard_auth_user | default('admin', true) }}"
+traefik_dashboard_auth_password_hash: "{{ vault_traefik_dashboard_auth_password_hash }}"
+traefik_dashboard_auth_users:
+  - "{{ traefik_dashboard_auth_user }}:{{ traefik_dashboard_auth_password_hash }}"
+traefik_log_level: INFO
+traefik_metrics_enabled: true

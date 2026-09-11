@@ -1,0 +1,67 @@
+# Mise configuration for vps-ansible
+# https://mise.jdx.dev/
+#
+# Usage:
+#   mise install          # Install Python and create .venv
+#   mise run deps         # Install project dependencies
+#   mise run lint         # Run linting
+#   mise run deploy       # Deploy to VPS
+#   mise run check        # Dry-run deployment
+
+min_version = "2024.9.5"
+
+[tools]
+python = "3.14.7"
+uv = "0.12.12"
+
+[settings]
+python.uv_venv_auto = "create|source"
+
+[env]
+# Project name derived from directory
+PROJECT_NAME = "{{ config_root | basename }}"
+EDITOR = "nvim"
+
+# Ansible configuration
+ANSIBLE_HOST_KEY_CHECKING = "False"
+ANSIBLE_VAULT_PASSWORD_FILE = "{{ config_root }}/.vault-password"
+
+[tasks.deps]
+description = "Install Python and Ansible dependencies via uv"
+run = [
+    "uv pip install --upgrade pip",
+    "uv pip install -r requirements.txt",
+    "ansible-galaxy install -r requirements.yml",
+    "ansible-galaxy collection install -r collections/requirements.yml",
+]
+
+[tasks.lint]
+description = "Run ansible-lint and yamllint"
+run = [
+    "ansible-lint",
+    "yamllint .",
+]
+
+[tasks.check]
+description = "Dry-run deployment (check mode)"
+run = "ansible-playbook -i inventory/prod/hosts.yml playbooks/site.yml --check --diff"
+
+[tasks.deploy]
+description = "Deploy to VPS"
+run = "ansible-playbook -i inventory/prod/hosts.yml playbooks/site.yml"
+
+[tasks.test]
+description = "Run Molecule tests"
+run = "molecule test"
+
+[tasks.vault-encrypt]
+description = "Encrypt vault.yml"
+run = "ansible-vault encrypt inventory/prod/group_vars/vps/vault.yml"
+
+[tasks.vault-decrypt]
+description = "Decrypt vault.yml"
+run = "ansible-vault decrypt inventory/prod/group_vars/vps/vault.yml"
+
+[tasks.vault-edit]
+description = "Edit vault.yml"
+run = "ansible-vault edit inventory/prod/group_vars/vps/vault.yml"

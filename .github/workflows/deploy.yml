@@ -1,0 +1,52 @@
+name: VPS Ansible Deploy
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install Ansible and dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Install Ansible Collections
+        run: |
+          ansible-galaxy collection install -r collections/requirements.yml
+
+      - name: Setup SSH
+        uses: webfactory/ssh-agent@v0.9.1
+        with:
+          ssh-private-key: ${{ secrets.ANSIBLE_SSH_KEY }}
+
+      - name: Create Vault Password File
+        run: |
+          echo "${{ secrets.ANSIBLE_VAULT_PASSWORD }}" > .vault-password
+          chmod 600 .vault-password
+
+      - name: Create Sudo Password File
+        run: |
+          echo "${{ secrets.ANSIBLE_SUDO_PASSWORD }}" > .sudo-password
+          chmod 600 .sudo-password
+
+      - name: Run Ansible Playbook
+        env:
+          ANSIBLE_HOST_KEY_CHECKING: 'False'
+          ANSIBLE_FORCE_COLOR: 'True'
+        run: |
+          ansible-playbook -i inventory/prod/hosts.yml playbooks/site.yml --diff

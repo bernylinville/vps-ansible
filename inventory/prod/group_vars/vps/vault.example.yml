@@ -1,0 +1,51 @@
+---
+# Ansible Vault 加密变量示例
+# 复制此文件为 vault.yml 并加密:
+#   cp vault.example.yml vault.yml
+#   ansible-vault encrypt vault.yml
+#
+# 运行时通过 .vault-password 文件或 ANSIBLE_VAULT_PASSWORD_FILE 环境变量解密
+
+# VPS 主机 IP (加密)
+vault_vps_host_ip: "YOUR_VPS_IP"
+
+# 域名 (加密)
+vault_domain_name: "your-domain.com"
+
+# SSH 端口 (加密)
+vault_ssh_port: "YOUR_SSH_PORT"
+
+# 系统用户名 (加密)
+vault_ansible_user: "YOUR_USER"
+
+# VPS sudo 密码
+vault_ansible_become_password: "CHANGEME"
+
+# Cloudflare DNS API Token (用于 Traefik ACME DNS-01 Challenge)
+# 权限: Zone:DNS:Edit
+vault_traefik_cloudflare_dns_api_token: "CHANGEME"
+
+# Vaultwarden Admin Token (Argon2 PHC hash 格式)
+# 1. 先生成随机 token: openssl rand -base64 48
+# 2. 然后在 Vaultwarden 容器中生成 Argon2 hash:
+#    docker exec -it vaultwarden /vaultwarden hash
+# 3. 输入你的 token，复制输出的 $argon2id$... 字符串
+# 详见: https://github.com/dani-garcia/vaultwarden/wiki/Enabling-admin-page#using-argon2
+vault_vaultwarden_admin_token: "CHANGEME"
+
+# Sub2API secrets (生成: openssl rand -hex 32)
+vault_sub2api_postgres_password: "CHANGEME"
+vault_sub2api_redis_password: "CHANGEME"
+vault_sub2api_jwt_secret: "CHANGEME"
+vault_sub2api_totp_encryption_key: "CHANGEME"
+# 管理员账号 (仅首次初始化时生效)
+vault_sub2api_admin_email: "admin@example.com"
+vault_sub2api_admin_password: "CHANGEME"
+
+# Traefik Dashboard 认证用户名
+vault_traefik_dashboard_auth_user: "admin"
+
+# Traefik Dashboard 认证密码 (htpasswd hash 值, 不包含用户名前缀)
+# 生成: htpasswd -nbB admin 'YOUR_PASSWORD' | cut -d: -f2 | sed 's/\$/\$\$/g'
+# 注意: 只需要密码 hash 部分，不要包含 "username:" 前缀
+vault_traefik_dashboard_auth_password_hash: "CHANGEME"

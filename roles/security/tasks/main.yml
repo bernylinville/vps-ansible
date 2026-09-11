@@ -1,0 +1,98 @@
+---
+- name: Ensure SSH is running
+  ansible.builtin.service:
+    name: "{{ security_sshd_name | default('ssh') }}"
+    state: started
+  ignore_errors: true
+
+- name: Check if sshd_config exists
+  ansible.builtin.stat:
+    path: /etc/ssh/sshd_config
+  register: sshd_config_stat
+
+- name: Harden SSH configuration
+  ansible.builtin.lineinfile:
+    dest: /etc/ssh/sshd_config
+    regexp: "{{ item.regexp }}"
+    line: "{{ item.line }}"
+    state: present
+    validate: 'sshd -T -f %s'
+    mode: "0644"
+  with_items:
+    - regexp: "^PasswordAuthentication"
+      line: "PasswordAuthentication {{ security_ssh_password_authentication }}"
+    - regexp: "^PermitRootLogin"
+      line: "PermitRootLogin {{ security_ssh_permit_root_login }}"
+    - regexp: "^Port"
+      line: "Port {{ security_ssh_port }}"
+    - regexp: "^UseDNS"
+      line: "UseDNS {{ security_ssh_usedns }}"
+    - regexp: "^PermitEmptyPasswords"
+      line: "PermitEmptyPasswords {{ security_ssh_permit_empty_password }}"
+    - regexp: "^ChallengeResponseAuthentication"
+      line: "ChallengeResponseAuthentication {{ security_ssh_challenge_response_auth }}"
+    - regexp: "^GSSAPIAuthentication"
+      line: "GSSAPIAuthentication {{ security_ssh_gss_api_authentication }}"
+    - regexp: "^X11Forwarding"
+      line: "X11Forwarding {{ security_ssh_x11_forwarding }}"
+  notify: restart ssh
+  when: sshd_config_stat.stat.exists
+
+- name: Configure SSH allowed users
+  ansible.builtin.lineinfile:
+    dest: /etc/ssh/sshd_config
+    regexp: '^AllowUsers'
+    line: "AllowUsers {{ security_ssh_allowed_users | join(' ') }}"
+    state: present
+    validate: 'sshd -T -f %s'
+    mode: "0644"
+  when: security_ssh_allowed_users | length > 0
+  notify: restart ssh
+
+- name: Configure SSH allowed groups
+  ansible.builtin.lineinfile:
+    dest: /etc/ssh/sshd_config
+    regexp: '^AllowGroups'
+    line: "AllowGroups {{ security_ssh_allowed_groups | join(' ') }}"
+    state: present
+    validate: 'sshd -T -f %s'
+    mode: "0644"
+  when: security_ssh_allowed_groups | length > 0
+  notify: restart ssh
+
+- name: Install fail2ban
+  ansible.builtin.apt:
+    name: fail2ban
+    state: present
+  when: security_fail2ban_enabled | bool
+
+- name: Configure fail2ban
+  ansible.builtin.template:
+    src: jail.local.j2
+    dest: /etc/fail2ban/jail.local
+    mode: "0644"
+  notify: restart fail2ban
+  when: security_fail2ban_enabled | bool
+
+- name: Ensure fail2ban is running
+  ansible.builtin.service:
+    name: fail2ban
+    state: started
+    enabled: true
+  when: security_fail2ban_enabled | bool
+
+- name: Install unattended-upgrades
+  ansible.builtin.apt:
+    name: unattended-upgrades
+    state: present
+  when: security_autoupdate_enabled | bool
+
+- name: Configure unattended-upgrades
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "/etc/apt/apt.conf.d/{{ item }}"
+    mode: "0644"
+  with_items:
+    - 10periodic
+    - 50unattended-upgrades
+  when: security_autoupdate_enabled | bool

@@ -1,0 +1,33 @@
+---
+# Yamllint configuration for vps-ansible
+# Relaxed rules for Ansible/Jinja2 templates
+
+extends: default
+
+rules:
+  line-length:
+    max: 160
+    level: error
+  truthy:
+    check-keys: false
+  document-start: disable
+  comments:
+    min-spaces-from-content: 1
+  comments-indentation: disable
+  braces:
+    max-spaces-inside: 1
+  octal-values:
+    forbid-implicit-octal: true
+    forbid-explicit-octal: true
+
+ignore:
+  - .venv/
+  - .ansible/
+  - roles/geerlingguy.*/
+  - .ansible/roles/
+  - collections/
+  - .github/workflows/
+  - __pycache__/
+  - .molecule/
+  - molecule/default/render_traefik.yml
+  - molecule/default/render_vaultwarden.yml

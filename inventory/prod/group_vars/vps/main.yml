@@ -1,0 +1,65 @@
+---
+# Docker 配置
+docker_edition: "ce"
+docker_packages:
+  - "docker-{{ docker_edition }}"
+  - "docker-{{ docker_edition }}-cli"
+  - containerd.io
+  - docker-buildx-plugin
+docker_packages_state: present
+docker_install_compose_plugin: true
+docker_compose_package: docker-compose-plugin
+docker_compose_package_state: present
+docker_users:
+  - "{{ vault_ansible_user }}"
+docker_daemon_options:
+  storage-driver: overlay2
+  iptables: true
+  ip-masq: true
+  log-opts:
+    max-size: "100m"
+
+# Docker 共享网络
+docker_custom_network_name: proxy_net
+docker_custom_network_subnet: "10.203.57.0/24"
+docker_custom_network_gateway: "10.203.57.1"
+docker_custom_network_ipam_config:
+  - subnet: "{{ docker_custom_network_subnet }}"
+    gateway: "{{ docker_custom_network_gateway }}"
+
+# 安全基线
+security_ssh_port: "{{ vault_ssh_port }}"
+security_ssh_password_authentication: "no"
+security_ssh_permit_root_login: "no"
+security_autoupdate_enabled: true
+security_fail2ban_enabled: true
+security_ssh_allowed_users:
+  - "{{ ansible_user }}"
+
+# NTP
+ntp_manage_config: true
+ntp_timezone: "{{ timezone }}"
+ntp_area: "us"
+ntp_servers:
+  - "time.cloudflare.com iburst"
+  - "time.google.com iburst"
+  - "0.us.pool.ntp.org iburst"
+  - "1.us.pool.ntp.org iburst"
+
+# Traefik 配置
+traefik_enabled: true
+traefik_image_tag: v3.7.13
+traefik_acme_email: "{{ vault_traefik_acme_email | default('admin@' + domain_name, true) }}"
+traefik_acme_ca_server: https://acme-v02.api.letsencrypt.org/directory
+
+# Sub2API 配置
+sub2api_enabled: true
+sub2api_image_tag: "0.2.4"
+sub2api_postgres_image_tag: "18.6-trixie"
+sub2api_redis_image_tag: "8.10.1-trixie"
+sub2api_hostname: "sub2api.{{ domain_name }}"
+
+# Vaultwarden 配置
+vaultwarden_enabled: true
+vaultwarden_image_tag: "1.37.2"
+vaultwarden_hostname: "vault.{{ domain_name }}"

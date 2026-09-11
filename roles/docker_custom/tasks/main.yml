@@ -1,0 +1,10 @@
+---
+- name: Ensure shared Docker network is present
+  when: docker_custom_network_create | default(true)
+  community.docker.docker_network:
+    name: "{{ docker_custom_network_name }}"
+    driver: "{{ docker_custom_network_driver }}"
+    attachable: "{{ docker_custom_network_attachable }}"
+    enable_ipv6: "{{ docker_custom_network_enable_ipv6 }}"
+    ipam_config: "{{ docker_custom_network_ipam_config }}"
+    labels: "{{ docker_custom_network_labels }}"

@@ -1,0 +1,9 @@
+---
+http:
+  middlewares:
+    {{ traefik_dashboard_auth_middleware_name }}:
+      basicAuth:
+        users:
+{% for user in traefik_dashboard_auth_users %}
+          - "{{ user }}"
+{% endfor %}

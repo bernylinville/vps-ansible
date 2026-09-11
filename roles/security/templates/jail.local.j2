@@ -1,0 +1,19 @@
+[DEFAULT]
+# Ban hosts for 10 minutes
+bantime = 600
+
+# Findtime: the time period to look for failures
+findtime = 600
+
+# Maxretry: number of failures before banning
+maxretry = 5
+
+# Backend: systemd journal
+backend = systemd
+
+[sshd]
+enabled = true
+port = ssh
+filter = sshd
+logpath = /var/log/auth.log
+maxretry = 5

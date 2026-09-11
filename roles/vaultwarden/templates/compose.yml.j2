@@ -1,0 +1,34 @@
+services:
+  vaultwarden:
+    image: "{{ vaultwarden_image }}:{{ vaultwarden_image_tag }}"
+    container_name: "{{ vaultwarden_container_name }}"
+    restart: unless-stopped
+    env_file:
+      - "{{ vaultwarden_env_path }}"
+    volumes:
+      - "{{ vaultwarden_data_dir }}:/data"
+    networks:
+      - "{{ vaultwarden_network_name }}"
+    healthcheck:
+      test: ["CMD", "/usr/bin/env", "bash", "-c", "curl -sf http://127.0.0.1:80/alive >/dev/null"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: "{{ vaultwarden_network_name }}"
+      traefik.http.routers.vaultwarden.rule: 'Host("{{ vaultwarden_hostname }}")'
+      traefik.http.routers.vaultwarden.entrypoints: "websecure"
+      traefik.http.routers.vaultwarden.tls.certresolver: "letsencrypt"
+      traefik.http.routers.vaultwarden.service: "vaultwarden"
+      traefik.http.services.vaultwarden.loadbalancer.server.port: "80"
+      traefik.http.routers.vaultwarden-ws.rule: 'Host("{{ vaultwarden_hostname }}") && Path("/notifications/hub")'
+      traefik.http.routers.vaultwarden-ws.entrypoints: "websecure"
+      traefik.http.routers.vaultwarden-ws.tls.certresolver: "letsencrypt"
+      traefik.http.routers.vaultwarden-ws.service: "vaultwarden-ws"
+      traefik.http.services.vaultwarden-ws.loadbalancer.server.port: "3012"
+
+networks:
+  {{ vaultwarden_network_name }}:
+    external: true
+    name: "{{ vaultwarden_network_name }}"

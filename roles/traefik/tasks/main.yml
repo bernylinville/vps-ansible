@@ -1,0 +1,42 @@
+---
+- name: Create Traefik stack directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0700"
+  loop:
+    - "{{ traefik_stack_dir }}"
+    - "{{ traefik_letsencrypt_dir }}"
+    - "{{ traefik_dynamic_config_dir }}"
+
+- name: Create ACME storage file
+  ansible.builtin.file:
+    path: "{{ traefik_acme_path }}"
+    state: touch
+    mode: "0600"
+
+- name: Render Traefik environment file
+  ansible.builtin.template:
+    src: .env.j2
+    dest: "{{ traefik_env_path }}"
+    mode: "0600"
+
+- name: Render Traefik dynamic middlewares file
+  ansible.builtin.template:
+    src: middlewares.yml.j2
+    dest: "{{ traefik_middlewares_path }}"
+    mode: "0600"
+
+- name: Render Traefik compose file
+  ansible.builtin.template:
+    src: compose.yml.j2
+    dest: "{{ traefik_compose_path }}"
+    mode: "0644"
+
+- name: Start Traefik stack
+  community.docker.docker_compose_v2:
+    project_src: "{{ traefik_stack_dir }}"
+    files:
+      - "{{ traefik_compose_path }}"
+    state: present
+    pull: "{{ traefik_image_pull_policy | default('always', true) }}"

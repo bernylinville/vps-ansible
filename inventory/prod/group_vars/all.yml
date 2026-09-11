@@ -1,0 +1,8 @@
+---
+ansible_user: "{{ vault_ansible_user }}"
+ansible_port: "{{ vault_ssh_port }}"
+ansible_become: true
+ansible_python_interpreter: /usr/bin/python3
+ansible_ssh_private_key_file: "{{ lookup('env', 'ANSIBLE_SSH_KEY_PATH') | default('~/.ssh/id_' + vault_ansible_user, true) }}"
+domain_name: "{{ vault_domain_name }}"
+timezone: America/Los_Angeles

@@ -1,0 +1,58 @@
+---
+- name: Configure VPS
+  hosts: vps
+  gather_facts: false
+
+  pre_tasks:
+    - name: Bootstrap python if needed
+      ansible.builtin.raw: test -e /usr/bin/python3 || (apt-get update && apt-get install -y python3 python3-apt)
+      changed_when: false
+      become: true
+
+    - name: Gather facts
+      ansible.builtin.setup:
+
+    - name: Install Docker python dependencies
+      ansible.builtin.apt:
+        name:
+          - python3-docker
+          - python3-requests
+        state: present
+        update_cache: true
+      become: true
+
+    - name: Change hostname
+      ansible.builtin.hostname:
+        name: "{{ inventory_hostname }}"
+      become: true
+
+    - name: Ensure hostname resolves in /etc/hosts
+      ansible.builtin.lineinfile:
+        path: /etc/hosts
+        regexp: '^127\.0\.1\.1\s+'
+        line: "127.0.1.1 {{ inventory_hostname }}"
+        insertafter: '^127\.0\.0\.1.*'
+        state: present
+      become: true
+
+  roles:
+    - role: ntp
+      become: true
+      tags: [ntp]
+    - role: security
+      become: true
+      tags: [security]
+    - role: docker
+      become: true
+      tags: [docker]
+    - role: docker_custom
+      tags: [docker]
+    - role: traefik
+      when: traefik_enabled | bool
+      tags: [traefik]
+    - role: vaultwarden
+      when: vaultwarden_enabled | bool
+      tags: [vaultwarden]
+    - role: sub2api
+      when: sub2api_enabled | bool
+      tags: [sub2api]

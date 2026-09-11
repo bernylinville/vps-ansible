@@ -1,0 +1,41 @@
+---
+# Docker role - Debian 13 only
+# Installs Docker CE from official repository
+
+docker_edition: "ce"
+docker_packages:
+  - "docker-{{ docker_edition }}"
+  - "docker-{{ docker_edition }}-cli"
+  - "docker-{{ docker_edition }}-rootless-extras"
+  - containerd.io
+  - docker-buildx-plugin
+  - docker-compose-plugin
+docker_packages_state: present
+
+docker_obsolete_packages:
+  - docker
+  - docker.io
+  - docker-engine
+  - docker-doc
+  - docker-compose
+  - docker-compose-v2
+  - podman-docker
+  - containerd
+  - runc
+
+docker_repo_url: https://download.docker.com/linux
+docker_apt_gpg_key: "{{ docker_repo_url }}/debian/gpg"
+docker_apt_filename: docker
+
+docker_service_manage: true
+docker_service_state: started
+docker_service_enabled: true
+
+docker_users: []
+
+docker_daemon_options:
+  storage-driver: overlay2
+  iptables: true
+  ip-masq: true
+  log-opts:
+    max-size: "100m"

@@ -1,0 +1,98 @@
+services:
+  sub2api:
+    image: "{{ sub2api_image }}:{{ sub2api_image_tag }}"
+    container_name: "{{ sub2api_container_name }}"
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    ulimits:
+      nofile:
+        soft: 100000
+        hard: 100000
+    env_file:
+      - "{{ sub2api_env_path }}"
+    volumes:
+      - "{{ sub2api_data_dir }}:/app/data"
+    networks:
+      - "{{ sub2api_network_name }}"
+    depends_on:
+      sub2api-postgres:
+        condition: service_healthy
+      sub2api-redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-T", "5", "-O", "/dev/null", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: "{{ sub2api_network_name }}"
+      traefik.http.routers.sub2api.rule: 'Host("{{ sub2api_hostname }}")'
+      traefik.http.routers.sub2api.entrypoints: "websecure"
+      traefik.http.routers.sub2api.tls.certresolver: "letsencrypt"
+      traefik.http.routers.sub2api.service: "sub2api"
+      traefik.http.services.sub2api.loadbalancer.server.port: "8080"
+
+  sub2api-postgres:
+    image: "{{ sub2api_postgres_image }}:{{ sub2api_postgres_image_tag }}"
+    container_name: "{{ sub2api_postgres_container_name }}"
+    restart: unless-stopped
+    ulimits:
+      nofile:
+        soft: 100000
+        hard: 100000
+    environment:
+      # 显式 PGDATA，避免 postgres:18 匿名卷导致 initdb 重置 (见上游 compose 注释)
+      PGDATA: /var/lib/postgresql/data
+      POSTGRES_USER: ${POSTGRES_USER:-sub2api}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:-sub2api}
+      TZ: ${TZ:-UTC}
+    volumes:
+      - "{{ sub2api_postgres_data_dir }}:/var/lib/postgresql/data"
+    networks:
+      - "{{ sub2api_network_name }}"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-sub2api} -d ${POSTGRES_DB:-sub2api} && psql -U ${POSTGRES_USER:-sub2api} -d ${POSTGRES_DB:-sub2api} -Atqc 'SELECT 1' >/dev/null",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 60s
+
+  sub2api-redis:
+    image: "{{ sub2api_redis_image }}:{{ sub2api_redis_image_tag }}"
+    container_name: "{{ sub2api_redis_container_name }}"
+    restart: unless-stopped
+    ulimits:
+      nofile:
+        soft: 100000
+        hard: 100000
+    environment:
+      TZ: ${TZ:-UTC}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+      # redis-cli (healthcheck) 通过 REDISCLI_AUTH 认证
+      REDISCLI_AUTH: ${REDIS_PASSWORD}
+    volumes:
+      - "{{ sub2api_redis_data_dir }}:/data"
+    # $$ 转义后由容器内 shell 展开 REDIS_PASSWORD，密码不落入 compose 文件
+    command: >
+      sh -c 'exec redis-server --save 60 1 --appendonly yes --appendfsync everysec --requirepass "$$REDIS_PASSWORD"'
+    networks:
+      - "{{ sub2api_network_name }}"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+networks:
+  {{ sub2api_network_name }}:
+    external: true
+    name: "{{ sub2api_network_name }}"

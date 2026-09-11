@@ -1,0 +1,17 @@
+.venv/
+.ansible/
+.vault-password
+.sudo-password
+*.pem
+*.key
+inventory/**/vault.yml
+!inventory/**/vault.example.yml
+*.retry
+.molecule/
+__pycache__/
+*.pyc
+.pytest_cache/
+.DS_Store
+
+# Third-party Ansible Galaxy roles (installed via ansible-galaxy)
+roles/geerlingguy.*/

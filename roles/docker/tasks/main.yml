@@ -1,0 +1,80 @@
+---
+- name: Remove old Docker GPG key from trusted.gpg.d
+  ansible.builtin.file:
+    path: /etc/apt/trusted.gpg.d/docker.asc
+    state: absent
+
+- name: Remove old Docker source list
+  ansible.builtin.file:
+    path: /etc/apt/sources.list.d/download_docker_com_linux_debian.list
+    state: absent
+
+- name: Remove legacy Docker repo file
+  ansible.builtin.file:
+    path: /etc/apt/sources.list.d/docker.list
+    state: absent
+
+- name: Remove obsolete Docker packages
+  ansible.builtin.apt:
+    name: "{{ docker_obsolete_packages }}"
+    state: absent
+
+- name: Install apt dependencies
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - python3-debian
+    state: present
+
+- name: Add Docker APT repository
+  ansible.builtin.deb822_repository:
+    name: "{{ docker_apt_filename }}"
+    types: deb
+    uris: "{{ docker_repo_url }}/debian"
+    suites: "{{ ansible_facts.distribution_release }}"
+    components: stable
+    signed_by: "{{ docker_apt_gpg_key }}"
+    state: present
+  notify: apt update
+
+- name: Flush handlers to update apt cache
+  ansible.builtin.meta: flush_handlers
+
+- name: Install Docker packages
+  ansible.builtin.apt:
+    name: "{{ docker_packages }}"
+    state: "{{ docker_packages_state }}"
+    allow_downgrade: true
+  notify: restart docker
+
+- name: Ensure Docker daemon directory exists
+  ansible.builtin.file:
+    path: /etc/docker
+    state: directory
+    mode: "0755"
+
+- name: Configure Docker daemon
+  ansible.builtin.copy:
+    content: "{{ docker_daemon_options | to_nice_json }}\n"
+    dest: /etc/docker/daemon.json
+    mode: "0644"
+  notify: restart docker
+
+- name: Ensure Docker is started and enabled
+  ansible.builtin.service:
+    name: docker
+    state: "{{ docker_service_state }}"
+    enabled: "{{ docker_service_enabled }}"
+  ignore_errors: "{{ ansible_check_mode }}"
+  when: docker_service_manage | bool
+
+- name: Flush handlers
+  ansible.builtin.meta: flush_handlers
+
+- name: Add users to docker group
+  ansible.builtin.user:
+    name: "{{ item }}"
+    groups: docker
+    append: true
+  with_items: "{{ docker_users }}"
+  when: docker_users | length > 0

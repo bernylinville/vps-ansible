@@ -1,0 +1,19 @@
+---
+# Ansible Lint 配置文件
+# 项目级 lint 规则，排除第三方 Galaxy roles
+
+exclude_paths:
+  - .venv/
+  - .ansible/
+  - roles/geerlingguy.docker/
+  - roles/geerlingguy.ntp/
+  - roles/geerlingguy.security/
+  - molecule/default/render_traefik.yml
+  - molecule/default/render_vaultwarden.yml
+
+# 使用最宽松的规则集，只检查基础问题
+profile: min
+
+warn_list:
+  - yaml[line-length]
+  - jinja[spacing]
