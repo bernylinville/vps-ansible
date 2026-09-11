@@ -6,6 +6,7 @@
 *.key
 inventory/**/vault.yml
 !inventory/**/vault.example.yml
+!inventory/prod/group_vars/vps/vault.yml
 *.retry
 .molecule/
 __pycache__/
