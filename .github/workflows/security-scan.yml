@@ -1,0 +1,117 @@
+name: Security Scan
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # 每周一 03:23 UTC (避开整点，GitHub 整点任务排队严重)
+    - cron: '23 3 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # ── 阶段 1: 仓库内扫描 (每次 push/PR) ──────────────────────────
+  # IaC 错配 (Ansible/Dockerfile/Compose) + 硬编码密钥
+  # 报告进入 Security tab，PR 内联标注
+  iac-scan:
+    name: IaC & Secrets Scan
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Trivy misconfig scan
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: config
+          scan-ref: .
+          format: sarif
+          output: trivy-misconfig.sarif
+          severity: HIGH,CRITICAL
+          exit-code: '0'
+
+      - name: Trivy secret scan
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: secret
+          format: sarif
+          output: trivy-secret.sarif
+          exit-code: '0'
+
+      - name: Upload misconfig SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-misconfig.sarif
+          category: trivy-misconfig
+
+      - name: Upload secret SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-secret.sarif
+          category: trivy-secret
+
+  # ── 阶段 2: 定时资产扫描 (每周一 / 手动) ────────────────────────
+  # 镜像 CVE: 清单与 inventory/prod/group_vars/vps/main.yml 保持同步
+  asset-scan:
+    name: Image CVE - ${{ matrix.image }}
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - traefik:v3.7.13
+          - weishaw/sub2api:0.2.4
+          - postgres:18.6-trixie
+          - redis:8.10.1-trixie
+          - vaultwarden/server:1.37.2
+    steps:
+      - name: Trivy image scan
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: image
+          image-ref: ${{ matrix.image }}
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
+
+  # 外部黑盒视角: 扫描 Traefik 对外暴露的 3 个 HTTPS 端点
+  exposure-scan:
+    name: External Exposure Scan
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check VPS_DOMAIN variable
+        run: |
+          if [ -z "${{ vars.VPS_DOMAIN }}" ]; then
+            echo "::error::VPS_DOMAIN variable 未设置 (Settings → Secrets and variables → Actions → Variables)"
+            exit 1
+          fi
+
+      - name: Nuclei scan
+        uses: projectdiscovery/nuclei-action@v3.1.0
+        with:
+          target: https://${{ vars.VPS_DOMAIN }},https://api.${{ vars.VPS_DOMAIN }},https://vault.${{ vars.VPS_DOMAIN }}
+          flags: >-
+            -severity medium,high,critical
+            -tags cve,misconfiguration,exposure,tls
+            -rate-limit 30
+          markdown-export: nuclei-report
+
+      - name: Upload report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nuclei-report
+          path: nuclei-report/
+          retention-days: 90
