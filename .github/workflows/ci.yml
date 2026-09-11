@@ -31,6 +31,9 @@ jobs:
       - name: Run yamllint
         run: yamllint .
 
+      - name: Create dummy vault password
+        run: echo "dummy" > .vault-password
+
       - name: Run ansible-lint
         run: ansible-lint
 
