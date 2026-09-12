@@ -69,3 +69,16 @@ vault_traefik_dashboard_auth_user: "admin"
 # 生成: htpasswd -nbB admin 'YOUR_PASSWORD' | cut -d: -f2 | sed 's/\$/\$\$/g'
 # 注意: 只需要密码 hash 部分，不要包含 "username:" 前缀
 vault_traefik_dashboard_auth_password_hash: "CHANGEME"
+
+# Beszel Agent (hub 位于 y9000p)
+# KEY = hub 首次启动生成的公钥 (y9000p: /srv/docker/beszel/beszel_data/id_ed25519.pub)
+vault_beszel_agent_key: "ssh-ed25519 CHANGEME"
+# hub Settings -> Tokens 生成的通用令牌
+vault_beszel_agent_token: "CHANGEME"
+
+# WireGuard (VPS ↔ 家 iStoreOS)
+# 生成: wg genkey / wg genpsk，公钥需在 iStoreOS uci 配置对应 peer
+vault_wireguard_private_key: "CHANGEME"
+vault_wireguard_preshared_key: "CHANGEME"
+# 对端 endpoint (host:port)，含家庭域名，不进公开仓库
+vault_wireguard_endpoint: "home.example.org:51820"

@@ -1,0 +1,12 @@
+services:
+  beszel-agent:
+    image: "{{ beszel_agent_image }}:{{ beszel_agent_image_tag }}"
+    container_name: "{{ beszel_agent_container_name }}"
+    restart: unless-stopped
+    # host 网络: 直接读取主机网卡统计，自动监听 LISTEN 端口
+    network_mode: host
+    env_file:
+      - "{{ beszel_agent_env_path }}"
+    volumes:
+      - "{{ beszel_agent_data_dir }}:/beszel_agent_data"
+      - /var/run/docker.sock:/var/run/docker.sock:ro

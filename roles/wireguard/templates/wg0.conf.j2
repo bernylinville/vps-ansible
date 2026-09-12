@@ -1,0 +1,13 @@
+[Interface]
+PrivateKey = {{ wireguard_private_key }}
+Address = {{ wireguard_address }}
+MTU = {{ wireguard_mtu }}
+
+[Peer]
+# 家 iStoreOS WireGuard 服务端
+PublicKey = {{ wireguard_server_public_key }}
+PresharedKey = {{ wireguard_preshared_key }}
+Endpoint = {{ wireguard_endpoint }}
+# 最小化路由: 仅经隧道到达 hub (y9000p 10.252.1.2)
+AllowedIPs = {{ wireguard_allowed_ips }}
+PersistentKeepalive = {{ wireguard_persistent_keepalive }}

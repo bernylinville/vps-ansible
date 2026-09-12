@@ -1,0 +1,29 @@
+---
+- name: Create Beszel agent stack directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - "{{ beszel_agent_stack_dir }}"
+    - "{{ beszel_agent_data_dir }}"
+
+- name: Render Beszel agent environment file
+  ansible.builtin.template:
+    src: .env.j2
+    dest: "{{ beszel_agent_env_path }}"
+    mode: "0600"
+
+- name: Render Beszel agent compose file
+  ansible.builtin.template:
+    src: compose.yml.j2
+    dest: "{{ beszel_agent_compose_path }}"
+    mode: "0644"
+
+- name: Start Beszel agent
+  community.docker.docker_compose_v2:
+    project_src: "{{ beszel_agent_stack_dir }}"
+    files:
+      - "{{ beszel_agent_compose_path }}"
+    state: present
+    pull: "{{ beszel_agent_image_pull_policy | default('always', true) }}"

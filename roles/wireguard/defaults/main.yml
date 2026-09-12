@@ -1,0 +1,8 @@
+---
+wireguard_conf_path: /etc/wireguard/wg0.conf
+wireguard_service_name: wg-quick@wg0
+wireguard_packages:
+  - wireguard-tools
+wireguard_private_key: "{{ vault_wireguard_private_key }}"
+wireguard_preshared_key: "{{ vault_wireguard_preshared_key }}"
+wireguard_endpoint: "{{ vault_wireguard_endpoint }}"

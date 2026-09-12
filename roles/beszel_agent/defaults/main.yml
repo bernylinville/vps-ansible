@@ -1,0 +1,15 @@
+---
+beszel_agent_stack_dir: /opt/stacks/beszel-agent
+beszel_agent_env_path: "{{ beszel_agent_stack_dir }}/.env"
+beszel_agent_compose_path: "{{ beszel_agent_stack_dir }}/compose.yml"
+beszel_agent_data_dir: "{{ beszel_agent_stack_dir }}/beszel_agent_data"
+beszel_agent_image: henrygd/beszel-agent
+beszel_agent_image_tag: "0.19.0"
+beszel_agent_container_name: beszel-agent
+# agent 监听地址: 只绑 wg 隧道地址，公网不可达
+beszel_agent_listen_addr: "10.252.1.6"
+beszel_agent_listen_port: "45876"
+# hub 位于 y9000p wg0 隧道地址，agent 主动连 hub 并用通用令牌自注册
+beszel_agent_hub_url: "http://10.252.1.2:8090"
+beszel_agent_key: "{{ vault_beszel_agent_key }}"
+beszel_agent_token: "{{ vault_beszel_agent_token }}"

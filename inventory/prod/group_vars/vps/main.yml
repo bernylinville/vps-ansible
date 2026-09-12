@@ -69,3 +69,14 @@ multica_subdomain: work
 vaultwarden_enabled: true
 vaultwarden_image_tag: "1.37.2"
 vaultwarden_hostname: "vault.{{ domain_name }}"
+
+# Beszel Agent 配置 (hub 位于 y9000p，经 WireGuard 隧道自动注册)
+beszel_agent_enabled: true
+beszel_agent_image_tag: "0.19.0"
+
+# WireGuard 隧道 (VPS rnd-vps-01 ↔ 家 iStoreOS；endpoint 含家庭域名与端口, 在 Vault)
+wireguard_address: "10.252.1.6/32"
+wireguard_server_public_key: "iGnd5x7+NLUMjn26lTS8j1fe2SJSsSLfm5cgosK0F0M="
+wireguard_allowed_ips: "10.252.1.2/32"
+wireguard_mtu: "1412"
+wireguard_persistent_keepalive: 25

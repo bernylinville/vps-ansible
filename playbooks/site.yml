@@ -59,3 +59,10 @@
     - role: multica
       when: multica_enabled | default(false) | bool
       tags: [multica]
+    - role: wireguard
+      become: true
+      tags: [wireguard]
+    - role: beszel_agent
+      when: beszel_agent_enabled | bool
+      become: true
+      tags: [beszel]

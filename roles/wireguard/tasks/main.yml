@@ -1,0 +1,24 @@
+---
+- name: Install WireGuard tools
+  ansible.builtin.apt:
+    name: "{{ wireguard_packages }}"
+    state: present
+    update_cache: true
+
+- name: Render WireGuard interface config
+  ansible.builtin.template:
+    src: wg0.conf.j2
+    dest: "{{ wireguard_conf_path }}"
+    mode: "0600"
+  notify: Restart WireGuard
+
+- name: Enable and start WireGuard interface
+  ansible.builtin.systemd:
+    name: "{{ wireguard_service_name }}"
+    enabled: true
+    state: started
+
+# 若 conf 变更触发 restart，必须在后续角色（beszel_agent 绑定 wg 地址）之前完成，
+# 否则接口重建会让 agent 已绑定的 socket 静默失效
+- name: Flush WireGuard handlers before dependent roles
+  ansible.builtin.meta: flush_handlers
