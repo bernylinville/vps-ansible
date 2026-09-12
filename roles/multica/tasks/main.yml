@@ -1,0 +1,95 @@
+---
+# 前置校验: secrets 必须就绪, allowed_emails 必须是 list
+# (no_log 防止断言消息带出 secret 值)
+- name: Assert multica secrets and allowlist are valid
+  ansible.builtin.assert:
+    that:
+      - multica_postgres_password is defined
+      - multica_postgres_password | length >= 32
+      - multica_postgres_password is not match('CHANGEME')
+      # DATABASE_URL 内嵌密码, 限定 hex 字符避免 URL 转义 (openssl rand -hex 32)
+      - multica_postgres_password is match('^[0-9a-f]+$')
+      - multica_jwt_secret is defined
+      - multica_jwt_secret | length >= 32
+      - multica_jwt_secret is not match('CHANGEME')
+      # list 可为空 (空名单 = 关闭所有新注册); 裸字符串 join 会逐字符展开
+      - multica_allowed_emails is sequence
+      - multica_allowed_emails is not string
+      - multica_allowed_emails is not mapping
+    fail_msg: >-
+      multica 前置校验失败: postgres_password/jwt_secret 须为 >=32 位 hex 随机值,
+      allowed_emails 须为 YAML list (可为空以关闭所有新注册, 不得为字符串/映射)
+  no_log: true
+
+# GitHub App: 四项全空 = 未启用; 部分配置 = 部署失败 (避免误以为已启用)
+- name: Assert multica GitHub App config is all-or-nothing and well-formed
+  vars:
+    gh_nonempty: >-
+      {{ [multica_github_app_slug, multica_github_app_id | string,
+          multica_github_webhook_secret, multica_github_app_private_key]
+         | select('!=', '') | list | length }}
+  ansible.builtin.assert:
+    that:
+      - gh_nonempty in [0, 4]
+      - gh_nonempty == 0 or (multica_github_app_id | string) is match('^[0-9]+$')
+      - >-
+        gh_nonempty == 0 or
+        multica_github_app_slug is match('^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?$')
+      - >-
+        gh_nonempty == 0 or
+        ('-----BEGIN' in multica_github_app_private_key and
+         '-----END' in multica_github_app_private_key and
+         '\n' in multica_github_app_private_key)
+    fail_msg: >-
+      GitHub App 四项 (slug/id/webhook_secret/private_key) 须全空或全部配置;
+      配置时 id 须为数字、slug 为 GitHub 合法 slug、私钥为含换行的 PEM 块
+  no_log: true
+
+- name: Create multica stack directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0700"
+  loop:
+    - "{{ multica_stack_dir }}"
+    - "{{ multica_postgres_data_dir }}"
+    - "{{ multica_uploads_dir }}"
+
+- name: Render multica environment file
+  ansible.builtin.template:
+    src: .env.j2
+    dest: "{{ multica_env_path }}"
+    mode: "0600"
+  no_log: true
+  diff: false
+
+- name: Render multica compose file
+  ansible.builtin.template:
+    src: compose.yml.j2
+    dest: "{{ multica_compose_path }}"
+    mode: "0644"
+
+# check mode 首轮 file/template 不落盘, docker_compose_v2 会因文件缺失失败:
+# 此时跳过启动 (stat 为读操作在 check mode 正常)
+- name: Check multica compose file exists
+  ansible.builtin.stat:
+    path: "{{ multica_compose_path }}"
+  register: multica_compose_stat
+
+- name: Explain check-mode skip on fresh host
+  ansible.builtin.debug:
+    msg: >-
+      check mode 且 {{ multica_compose_path }} 未落盘 (首次运行 template 被
+      check mode 跳过), 跳过容器编排校验; 真实部署后 check 可完整执行
+  when: ansible_check_mode and not multica_compose_stat.stat.exists
+
+- name: Start multica stack
+  when: not ansible_check_mode or multica_compose_stat.stat.exists
+  community.docker.docker_compose_v2:
+    project_src: "{{ multica_stack_dir }}"
+    files:
+      - "{{ multica_compose_path }}"
+    state: present
+    pull: "{{ multica_image_pull_policy }}"
+  # 模块输出含渲染后的 environment (DATABASE_URL/JWT_SECRET), 静默处理
+  no_log: true

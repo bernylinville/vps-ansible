@@ -56,3 +56,6 @@
     - role: sub2api
       when: sub2api_enabled | bool
       tags: [sub2api]
+    - role: multica
+      when: multica_enabled | default(false) | bool
+      tags: [multica]

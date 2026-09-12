@@ -59,6 +59,12 @@ sub2api_postgres_image_tag: "18.6-trixie"
 sub2api_redis_image_tag: "8.10.1-trixie"
 sub2api_hostname: "api.{{ domain_name }}"
 
+# Multica 配置 (AI 项目管理, 单 origin work.<domain>, 三容器: postgres/backend/frontend)
+multica_enabled: true
+multica_image_tag: "v0.4.43"
+multica_postgres_image_tag: "0.8.6-pg17-trixie"
+multica_subdomain: work
+
 # Vaultwarden 配置
 vaultwarden_enabled: true
 vaultwarden_image_tag: "1.37.2"

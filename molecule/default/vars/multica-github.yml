@@ -1,0 +1,10 @@
+---
+# Molecule 假 GitHub App 数据 (含 $literal/换行 PEM, 验证安全渲染与 compose 解析)
+# 注意: 不放 molecule.yml host_vars —— molecule config 会把 $VAR 插值为环境变量
+vault_multica_github_app_slug: "molecule-test-app"
+vault_multica_github_app_id: "123456"
+vault_multica_github_webhook_secret: "molecule$webhook$secret-0123456789"
+vault_multica_github_app_private_key: |
+  -----BEGIN RSA PRIVATE KEY-----
+  MIIBmoleculeFAKEkeyNOTreal0123456789abcdef0123456789
+  -----END RSA PRIVATE KEY-----

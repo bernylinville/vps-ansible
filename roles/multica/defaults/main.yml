@@ -1,0 +1,59 @@
+---
+# Multica (AI 项目管理) — 三容器: postgres / backend / frontend
+# 默认不启用: 生产由 group_vars 显式 multica_enabled: true 开启
+multica_enabled: false
+
+multica_stack_dir: /opt/stacks/multica
+multica_env_path: "{{ multica_stack_dir }}/.env"
+multica_compose_path: "{{ multica_stack_dir }}/compose.yml"
+multica_postgres_data_dir: "{{ multica_stack_dir }}/postgres"
+multica_uploads_dir: "{{ multica_stack_dir }}/uploads"
+
+# 镜像 (禁止 latest; tag 均经 GHCR/DockerHub manifest 验证)
+multica_postgres_image: pgvector/pgvector
+multica_postgres_image_tag: "0.8.6-pg17-trixie"
+multica_backend_image: ghcr.io/multica-ai/multica-backend
+multica_web_image: ghcr.io/multica-ai/multica-web
+multica_image_tag: "v0.4.43"
+
+# Compose 服务名 (容器网络 DNS 名); container_name 仅用于宿主机辨识
+multica_backend_container_name: multica-backend
+multica_frontend_container_name: multica-frontend
+multica_postgres_container_name: multica-postgres
+
+# 单一公网 origin: work.<domain>; 所有公网 URL/cookie/CORS 从此派生
+multica_subdomain: work
+multica_hostname: "{{ multica_subdomain }}.{{ domain_name | default('example.com', true) }}"
+multica_public_origin: "https://{{ multica_hostname }}"
+multica_network_name: "{{ docker_custom_network_name }}"
+# 专用数据库网络 (postgres 仅与 backend 通信, 无外发)
+multica_db_network_name: multica_db
+
+multica_tz: "{{ timezone | default('UTC', true) }}"
+# production 模式: 固定验证码被忽略, 随机码打印在 backend 日志
+multica_app_env: production
+
+multica_postgres_user: multica
+multica_postgres_db: multica
+multica_postgres_password: "{{ vault_multica_postgres_password }}"
+multica_jwt_secret: "{{ vault_multica_jwt_secret }}"
+
+# 注册语义: ALLOW_SIGNUP=false + 白名单例外 (vault list, 可为空以关闭所有新注册)
+multica_allow_signup: "false"
+multica_allowed_emails: "{{ vault_multica_allowed_emails | default([]) }}"
+
+# GitHub App 集成 (可选; 四项全空 = 未启用, 部分配置会在前置断言失败)
+multica_github_app_slug: "{{ vault_multica_github_app_slug | default('') }}"
+multica_github_app_id: "{{ vault_multica_github_app_id | default('') }}"
+multica_github_webhook_secret: "{{ vault_multica_github_webhook_secret | default('') }}"
+# PEM 须以 YAML block scalar (|) 存入 vault, 保留真实换行
+multica_github_app_private_key: "{{ vault_multica_github_app_private_key | default('') }}"
+
+# 信任 Traefik (proxy_net 网段) 的 X-Forwarded-For:
+# auth limiter (RATE_LIMIT_TRUSTED_PROXIES) 与 webhook/realtime (MULTICA_TRUSTED_PROXIES)
+multica_trusted_proxies: "{{ docker_custom_network_subnet | default('10.203.57.0/24', true) }}"
+
+# selfhost Compose 默认开启 VCS 集成 (Forgejo/Gitea/GitLab), 此处显式关闭; 与 GitHub App 集成无关
+multica_vcs_integration_enabled: "false"
+
+multica_image_pull_policy: always

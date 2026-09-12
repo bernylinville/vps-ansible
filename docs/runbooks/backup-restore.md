@@ -21,6 +21,11 @@ docker exec sub2api-postgres pg_dump -U sub2api -d sub2api -Fc \
   > "$BACKUP_DIR/sub2api-postgres.dump"
 tar czf "$BACKUP_DIR/sub2api-data.tar.gz" -C /opt/stacks/sub2api data
 
+# 备份 Multica (PostgreSQL 逻辑备份 -Fc 自带压缩 + 本地附件; 一致性要求时先停 backend)
+docker exec multica-postgres pg_dump -U multica -d multica -Fc \
+  > "$BACKUP_DIR/multica-postgres.dump"
+tar czf "$BACKUP_DIR/multica-uploads.tar.gz" -C /opt/stacks/multica uploads
+
 # 备份 Traefik 证书
 tar czf "$BACKUP_DIR/traefik-certs.tar.gz" -C /opt/stacks/traefik letsencrypt
 
@@ -46,6 +51,11 @@ ssh -p <YOUR_SSH_PORT> <YOUR_USER>@<YOUR_VPS_IP> "sudo tar czf - /opt/stacks/vau
 ssh -p <YOUR_SSH_PORT> <YOUR_USER>@<YOUR_VPS_IP> "docker exec sub2api-postgres pg_dump -U sub2api -d sub2api -Fc" > sub2api-db-$(date +%Y%m%d).dump
 ssh -p <YOUR_SSH_PORT> <YOUR_USER>@<YOUR_VPS_IP> "sudo tar czf - /opt/stacks/sub2api/data" > sub2api-data-$(date +%Y%m%d).tar.gz
 
+# 备份 Multica (PostgreSQL 逻辑备份 -Fc 自带压缩 + 本地附件; 一致性要求时先停 backend)
+# 归档用相对路径 uploads/ (-C), 与恢复步骤的解压目录对应
+ssh -p <YOUR_SSH_PORT> <YOUR_USER>@<YOUR_VPS_IP> "docker exec multica-postgres pg_dump -U multica -d multica -Fc" > multica-db-$(date +%Y%m%d).dump
+ssh -p <YOUR_SSH_PORT> <YOUR_USER>@<YOUR_VPS_IP> "sudo tar czf - -C /opt/stacks/multica uploads" > multica-uploads-$(date +%Y%m%d).tar.gz
+
 # 备份 Traefik 证书
 ssh -p <YOUR_SSH_PORT> <YOUR_USER>@<YOUR_VPS_IP> "sudo tar czf - /opt/stacks/traefik/letsencrypt" > traefik-certs-backup-$(date +%Y%m%d).tar.gz
 ```
@@ -65,6 +75,37 @@ ssh -p <YOUR_SSH_PORT> <YOUR_USER>@<YOUR_VPS_IP> "sudo rm -rf /opt/stacks/vaultw
 # 3. 重启服务
 ssh -p <YOUR_SSH_PORT> <YOUR_USER>@<YOUR_VPS_IP> "docker start vaultwarden"
 ```
+
+### 恢复 Multica
+
+前置：备份必须来自同一版本镜像（迁移 forward-only），且 Vault 中 `vault_multica_jwt_secret` 不变（否则全部会话/daemon 令牌失效）。
+
+约定：已选定单个备份文件并上传到 VPS 的 `/tmp/multica-restore.dump` 与 `/tmp/multica-uploads-restore.tar.gz`（勿用通配符匹配多份备份）。以下全程在 VPS 上执行：
+
+```bash
+# 1. 停 frontend/backend (postgres 保持运行)
+cd /opt/stacks/multica && docker compose -f compose.yml stop multica-frontend multica-backend
+
+# 2. 确认 postgres 可用
+docker exec multica-postgres pg_isready -U multica -d multica
+
+# 3. 恢复数据库 (--clean --if-exists 先删后建, 会覆盖目标库全部数据)
+docker exec -i multica-postgres pg_restore -U multica -d multica \
+  --clean --if-exists --exit-on-error < /tmp/multica-restore.dump
+
+# 4. 验证归档层级为 uploads/... 后, mv 保存旧目录再解压 (失败可回退)
+tar tzf /tmp/multica-uploads-restore.tar.gz | head -3
+sudo mv /opt/stacks/multica/uploads /opt/stacks/multica/uploads.bak-$(date +%Y%m%d%H%M%S)
+sudo mkdir -m 0700 /opt/stacks/multica/uploads
+sudo tar xzf /tmp/multica-uploads-restore.tar.gz -C /opt/stacks/multica
+
+# 5. 起栈并验证 (backend 启动会先跑迁移)
+cd /opt/stacks/multica && docker compose -f compose.yml up -d
+curl -fsS https://work.<YOUR_DOMAIN>/readyz
+# 期望 {"status":"ok","checks":{"db":"ok","migrations":"ok"}}
+```
+
+验证通过后再清理：`sudo rm -rf /opt/stacks/multica/uploads.bak-*`。
 
 ### 恢复 Traefik 证书
 

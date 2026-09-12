@@ -85,3 +85,4 @@
 - import_playbook: render_traefik.yml
 - import_playbook: render_vaultwarden.yml
 - import_playbook: render_sub2api.yml
+- import_playbook: render_multica.yml

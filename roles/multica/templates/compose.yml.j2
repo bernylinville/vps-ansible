@@ -1,0 +1,107 @@
+{#- Multica 三容器: 单 origin work.<domain>, Traefik 按 Path 分流; 容器不发布宿主端口
+    服务名唯一化: backend/frontend 挂共享 proxy_net, 通用名会与其他栈的 DNS 别名冲突;
+    postgres 仅在专用 internal 网络, 保留通用名 (与官方 compose 一致) -#}
+services:
+  {{ multica_backend_container_name }}:
+    image: "{{ multica_backend_image }}:{{ multica_image_tag }}"
+    container_name: "{{ multica_backend_container_name }}"
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    env_file:
+      - "{{ multica_env_path }}"
+    volumes:
+      - "{{ multica_uploads_dir }}:/app/data/uploads"
+    networks:
+      - "{{ multica_network_name }}"
+      - "{{ multica_db_network_name }}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # /readyz 校验 db + migrations (启动时先跑迁移), 比 /health 严格
+    # 127.0.0.1 避免 localhost 解析 ::1 而服务仅绑 IPv4 (实测 alpine/node 镜像)
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-T", "5", "-O", "/dev/null", "http://127.0.0.1:8080/readyz"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 300s
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: "{{ multica_network_name }}"
+      # 直达 backend 的边界 (v0.4.43 源码核实):
+      #  /api(/...)  含 daemon WS /api/daemon/ws (web 镜像不能代理 WS 升级)
+      #  /uploads(/...) /v1(/...)  后端静态与公开 API
+      #  /health /readyz /healthz  CLI 探活与健康 (web 代理仅转发 /health)
+      #  /ws(/...)  浏览器 realtime WS (PathPrefix("/ws") 会误匹配 /wsfoo 等 workspace slug)
+      #  /auth/{send-code,verify-code,logout,google}  登录 API; /auth/callback 是前端页面须留给 web
+      traefik.http.routers.multica-backend.rule: 'Host("{{ multica_hostname }}") && (Path("/api") || PathPrefix("/api/") || PathPrefix("/uploads/") || PathPrefix("/v1/") || Path("/health") || Path("/readyz") || Path("/healthz") || Path("/ws") || PathPrefix("/ws/") || Path("/auth/send-code") || Path("/auth/verify-code") || Path("/auth/logout") || Path("/auth/google"))'
+      traefik.http.routers.multica-backend.entrypoints: "websecure"
+      traefik.http.routers.multica-backend.tls.certresolver: "letsencrypt"
+      traefik.http.routers.multica-backend.priority: "200"
+      traefik.http.routers.multica-backend.service: "multica-backend"
+      traefik.http.services.multica-backend.loadbalancer.server.port: "8080"
+
+  {{ multica_frontend_container_name }}:
+    image: "{{ multica_web_image }}:{{ multica_image_tag }}"
+    container_name: "{{ multica_frontend_container_name }}"
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      # Next proxy 运行时上游 (唯一服务名 DNS); 浏览器始终同源相对路径
+      REMOTE_API_URL: http://{{ multica_backend_container_name }}:8080
+    networks:
+      - "{{ multica_network_name }}"
+    depends_on:
+      {{ multica_backend_container_name }}:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-T", "5", "--spider", "http://127.0.0.1:3000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: "{{ multica_network_name }}"
+      # 兜底: 同 Host 其余路径 (页面、/auth/callback 等) 全部走 web
+      traefik.http.routers.multica-frontend.rule: 'Host("{{ multica_hostname }}")'
+      traefik.http.routers.multica-frontend.entrypoints: "websecure"
+      traefik.http.routers.multica-frontend.tls.certresolver: "letsencrypt"
+      traefik.http.routers.multica-frontend.priority: "50"
+      traefik.http.routers.multica-frontend.service: "multica-frontend"
+      traefik.http.services.multica-frontend.loadbalancer.server.port: "3000"
+
+  postgres:
+    image: "{{ multica_postgres_image }}:{{ multica_postgres_image_tag }}"
+    container_name: "{{ multica_postgres_container_name }}"
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required}
+      TZ: ${TZ:-UTC}
+    volumes:
+      - "{{ multica_postgres_data_dir }}:/var/lib/postgresql/data"
+    networks:
+      - "{{ multica_db_network_name }}"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-multica} -d ${POSTGRES_DB:-multica}",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+networks:
+  {{ multica_network_name }}:
+    external: true
+    name: "{{ multica_network_name }}"
+  {{ multica_db_network_name }}:
+    internal: true

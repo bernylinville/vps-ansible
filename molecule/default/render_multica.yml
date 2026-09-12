@@ -1,0 +1,41 @@
+---
+- name: Render multica configuration for molecule verify
+  hosts: all
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Load multica role defaults
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/../../roles/multica/defaults/main.yml"
+
+    - name: Load fake GitHub App vault data
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/vars/multica-github.yml"
+
+    # include_vars 优先级高于 molecule host_vars, 显式置 bool false 以测试 lower 规范化
+    - name: Force bool false allow_signup to test lower-normalization
+      ansible.builtin.set_fact:
+        multica_allow_signup: false
+
+    - name: Create multica stack directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0700"
+      loop:
+        - /opt/stacks/multica
+        - /opt/stacks/multica/postgres
+        - /opt/stacks/multica/uploads
+
+    - name: Render multica environment file
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../../roles/multica/templates/.env.j2"
+        dest: /opt/stacks/multica/.env
+        mode: "0600"
+      no_log: true
+
+    - name: Render multica compose file
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../../roles/multica/templates/compose.yml.j2"
+        dest: /opt/stacks/multica/compose.yml
+        mode: "0644"

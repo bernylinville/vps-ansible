@@ -92,6 +92,16 @@
         - /opt/stacks/sub2api/redis
       register: sub2api_dirs
 
+    - name: Verify Multica stack files were rendered
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop:
+        - /opt/stacks/multica/compose.yml
+        - /opt/stacks/multica/.env
+        - /opt/stacks/multica/postgres
+        - /opt/stacks/multica/uploads
+      register: multica_files
+
     # docker compose config 只做解析/插值校验, 不需要 daemon
     - name: Validate Traefik compose syntax
       ansible.builtin.command: docker compose -f /opt/stacks/traefik/compose.yml config --quiet
@@ -114,6 +124,13 @@
       failed_when: false
       when: sub2api_compose.stat.exists | default(false)
 
+    - name: Validate Multica compose syntax (incl. .env interpolation)
+      ansible.builtin.command: docker compose -f /opt/stacks/multica/compose.yml config --quiet
+      changed_when: false
+      register: multica_config
+      failed_when: false
+      when: multica_files.results[0].stat.exists | default(false)
+
     - name: Assert all rendered files exist
       ansible.builtin.assert:
         that:
@@ -135,12 +152,22 @@
       loop_control:
         label: "{{ item.item }}"
 
+    - name: Assert Multica files exist; .env is 0600 and data dirs 0700
+      ansible.builtin.assert:
+        that:
+          - multica_files.results[0].stat.exists
+          - multica_files.results[1].stat.exists and multica_files.results[1].stat.mode == '0600'
+          - multica_files.results[2].stat.exists and multica_files.results[2].stat.mode == '0700'
+          - multica_files.results[3].stat.exists and multica_files.results[3].stat.mode == '0700'
+        fail_msg: "multica rendered files missing or wrong mode"
+
     - name: Assert rendered compose files are valid
       ansible.builtin.assert:
         that:
           - (traefik_config.rc | default(1)) == 0
           - (vaultwarden_config.rc | default(1)) == 0
           - (sub2api_config.rc | default(1)) == 0
+          - (multica_config.rc | default(1)) == 0
         fail_msg: "docker compose config validation failed"
 
     - name: Get resolved sub2api compose config
@@ -154,6 +181,178 @@
           - (sub2api_json.stdout | from_json)['services'].values()
             | selectattr('ports', 'defined') | list | length == 0
         fail_msg: "sub2api compose must not publish any host ports"
+
+    - name: Get resolved multica compose config
+      ansible.builtin.command: docker compose -f /opt/stacks/multica/compose.yml config --format json
+      changed_when: false
+      register: multica_json
+      # stdout 含 env_file 解码后的全部 secrets, 静默
+      no_log: true
+
+    - name: Slurp multica compose source (on target)
+      ansible.builtin.slurp:
+        src: /opt/stacks/multica/compose.yml
+      register: multica_compose_b64
+
+    - name: Set multica resolved facts
+      ansible.builtin.set_fact:
+        multica_services: "{{ (multica_json.stdout | from_json)['services'] }}"
+        multica_networks: "{{ (multica_json.stdout | from_json)['networks'] }}"
+        multica_compose_raw: "{{ multica_compose_b64.content | b64decode }}"
+
+    - name: Assert multica publishes no host ports
+      ansible.builtin.assert:
+        that:
+          - multica_services.values() | selectattr('ports', 'defined') | list | length == 0
+        fail_msg: "multica compose must not publish any host ports"
+
+    - name: Assert multica images are pinned to fixed tags
+      ansible.builtin.assert:
+        that:
+          - multica_services['multica-backend'].image == 'ghcr.io/multica-ai/multica-backend:v0.4.43'
+          - multica_services['multica-frontend'].image == 'ghcr.io/multica-ai/multica-web:v0.4.43'
+          - multica_services['postgres'].image == 'pgvector/pgvector:0.8.6-pg17-trixie'
+        fail_msg: "multica images must be pinned to fixed tags"
+
+    - name: Assert multica network topology (db isolated, frontend/backend on proxy_net)
+      ansible.builtin.assert:
+        that:
+          - >-
+            'proxy_net' in multica_services['multica-backend'].networks
+            and 'multica_db' in multica_services['multica-backend'].networks
+          - >-
+            'proxy_net' in multica_services['multica-frontend'].networks
+            and 'multica_db' not in multica_services['multica-frontend'].networks
+          - >-
+            'multica_db' in multica_services['postgres'].networks
+            and 'proxy_net' not in multica_services['postgres'].networks
+          - multica_networks['multica_db'].internal | default(false) | bool
+          - multica_networks['proxy_net'].external | default(false) | bool
+        fail_msg: "multica network topology incorrect"
+
+    - name: Set multica backend routing rule fact
+      ansible.builtin.set_fact:
+        multica_rule: "{{ multica_services['multica-backend'].labels['traefik.http.routers.multica-backend.rule'] }}"
+
+    # 路由边界契约: /auth/callback 是前端页面, 不得整段前缀 /auth/;
+    # /ws 必须精确+尾缀匹配, 裸 PathPrefix("/ws") 会误配 /wsfoo 等 workspace slug
+    - name: Assert backend Traefik routing boundary
+      ansible.builtin.assert:
+        that:
+          - >-
+            'Path("/api")' in multica_rule and 'PathPrefix("/api/")' in multica_rule
+            and 'PathPrefix("/uploads/")' in multica_rule and 'PathPrefix("/v1/")' in multica_rule
+          - >-
+            'Path("/health")' in multica_rule and 'Path("/readyz")' in multica_rule
+            and 'Path("/healthz")' in multica_rule
+          - >-
+            'Path("/ws")' in multica_rule and 'PathPrefix("/ws/")' in multica_rule
+            and 'PathPrefix("/ws")' not in multica_rule | replace('PathPrefix("/ws/")', '')
+          - >-
+            'Path("/auth/send-code")' in multica_rule and 'Path("/auth/verify-code")' in multica_rule
+            and 'Path("/auth/logout")' in multica_rule and 'Path("/auth/google")' in multica_rule
+            and 'PathPrefix("/auth/")' not in multica_rule
+        fail_msg: "multica-backend traefik rule boundary incorrect"
+
+    - name: Assert frontend upstream uses unique service DNS name
+      ansible.builtin.assert:
+        that:
+          - multica_services['multica-frontend'].environment['REMOTE_API_URL'] == 'http://multica-backend:8080'
+        fail_msg: "frontend REMOTE_API_URL must use unique backend service name"
+
+    - name: Slurp multica env file (0600) for semantic assertions
+      ansible.builtin.slurp:
+        src: /opt/stacks/multica/.env
+      register: multica_env_b64
+      no_log: true
+
+    - name: Assert no plaintext secrets leak into rendered compose source
+      ansible.builtin.assert:
+        that:
+          - "'0123456789abcdef0123456789abcdef' not in multica_compose_raw"
+          - "'fedcba9876543210fedcba9876543210' not in multica_compose_raw"
+          - "'POSTGRES_PASSWORD is required' in multica_compose_raw"
+        fail_msg: "plaintext secret leaked into multica compose.yml"
+
+    - name: Assert env semantics (signup closed, VCS off, single-origin URLs)
+      vars:
+        multica_env: "{{ multica_env_b64.content | b64decode }}"
+      ansible.builtin.assert:
+        that: >-
+          ['ALLOW_SIGNUP=false',
+           'MULTICA_VCS_INTEGRATION_ENABLED=false',
+           'CORS_ALLOWED_ORIGINS=https://work.localhost',
+           'FRONTEND_ORIGIN=https://work.localhost',
+           'MULTICA_PUBLIC_URL=https://work.localhost']
+          | select('in', multica_env) | list | length == 5
+          and 'COOKIE_DOMAIN=' not in multica_env
+          and 'ALLOWED_EMAILS=\n' in multica_env
+          and 'ALLOWED_EMAIL_DOMAINS=\n' in multica_env
+        fail_msg: "multica .env semantics incorrect (allowlist must be empty lines)"
+
+    # GitHub App: docker compose config 合并并解码 env_file 后,
+    # 直接比较解析值: PEM 与原字符串全等; webhook secret 按 canonical config 序列化
+    # (config 输出会把实际 $ 再次序列化为 $$, 容器实际值与原始 $literal 一致)
+    - name: Load fake GitHub App vault data
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/vars/multica-github.yml"
+
+    - name: Assert GitHub App env parsed by compose equals fake vault values
+      ansible.builtin.assert:
+        that:
+          - multica_services['multica-backend'].environment['GITHUB_APP_SLUG'] == vault_multica_github_app_slug
+          - multica_services['multica-backend'].environment['GITHUB_APP_ID'] == vault_multica_github_app_id
+          - >-
+            multica_services['multica-backend'].environment['GITHUB_WEBHOOK_SECRET']
+            == vault_multica_github_webhook_secret | replace('$', '$$')
+          - >-
+            multica_services['multica-backend'].environment['GITHUB_APP_PRIVATE_KEY']
+            == vault_multica_github_app_private_key
+        fail_msg: "GitHub App env values differ from vault source after compose parsing"
+      no_log: true
+
+    - name: Assert GitHub secrets never appear in compose source
+      ansible.builtin.assert:
+        that:
+          - "'GITHUB_APP_PRIVATE_KEY' not in multica_compose_raw"
+          - "'GITHUB_WEBHOOK_SECRET' not in multica_compose_raw"
+        fail_msg: "GitHub secret leaked into multica compose.yml"
+
+    # full-empty GitHub 配置也须可渲染 (未启用路径)
+    - name: Render env with empty GitHub config (must succeed)
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/../../roles/multica/defaults/main.yml"
+
+    # include_vars 优先级高于 task vars, 须用 set_fact 强制置空后再渲染
+    - name: Force GitHub vars empty for no-integration rendering
+      ansible.builtin.set_fact:
+        multica_github_app_slug: ""
+        multica_github_app_id: ""
+        multica_github_webhook_secret: ""
+        multica_github_app_private_key: ""
+
+    - name: Render env template with all-empty GitHub vars
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../../roles/multica/templates/.env.j2"
+        dest: /tmp/multica-env-gh-empty
+        mode: "0600"
+      no_log: true
+
+    - name: Slurp empty-GitHub env rendering
+      ansible.builtin.slurp:
+        src: /tmp/multica-env-gh-empty
+      register: gh_empty_b64
+
+    - name: Assert empty-GitHub env rendered with empty values
+      vars:
+        gh_lines: "{{ (gh_empty_b64.content | b64decode).splitlines() }}"
+      ansible.builtin.assert:
+        that:
+          - "'GITHUB_APP_SLUG=' in gh_lines"
+          - "'GITHUB_APP_ID=' in gh_lines"
+          - "'GITHUB_WEBHOOK_SECRET=\"\"' in gh_lines"
+          - "'GITHUB_APP_PRIVATE_KEY=\"\"' in gh_lines"
+        fail_msg: "empty GitHub config must render empty env values"
 
     - name: Show test results
       ansible.builtin.debug:
@@ -172,3 +371,5 @@
           - "Traefik config valid: {{ 'YES' if (traefik_config.rc | default(1)) == 0 else 'NO/SKIPPED' }}"
           - "Vaultwarden config valid: {{ 'YES' if (vaultwarden_config.rc | default(1)) == 0 else 'NO/SKIPPED' }}"
           - "Sub2API config valid: {{ 'YES' if (sub2api_config.rc | default(1)) == 0 else 'NO/SKIPPED' }}"
+          - "Multica files: {{ 'EXISTS' if multica_files.results[0].stat.exists else 'MISSING' }}"
+          - "Multica config valid: {{ 'YES' if (multica_config.rc | default(1)) == 0 else 'NO/SKIPPED' }}"

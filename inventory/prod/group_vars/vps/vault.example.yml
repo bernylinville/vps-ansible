@@ -42,6 +42,26 @@ vault_sub2api_totp_encryption_key: "CHANGEME"
 vault_sub2api_admin_email: "admin@example.com"
 vault_sub2api_admin_password: "CHANGEME"
 
+# Multica secrets
+# postgres 密码 (openssl rand -hex 32, hex 字符避免 DATABASE_URL 转义问题)
+vault_multica_postgres_password: "CHANGEME"
+# JWT 签名密钥 (openssl rand -hex 32)
+vault_multica_jwt_secret: "CHANGEME"
+# 允许注册的邮箱白名单 (ALLOW_SIGNUP=false 时的例外名单, YAML list; 空列表 = 关闭所有新注册)
+vault_multica_allowed_emails: []
+
+# Multica GitHub App (slug 来自 App 公共 URL；App ID 为数字标识)
+# 四项须全空或全部配置; slug 形如 https://github.com/apps/<slug> 的尾段
+vault_multica_github_app_slug: "your-github-app-slug"
+vault_multica_github_app_id: "123456"
+# 与 GitHub App 表单中的 Webhook secret 一致，不是 OAuth Client secret
+vault_multica_github_webhook_secret: "CHANGEME"
+# 完整 PEM 私钥，包含 BEGIN/END 行与真实换行；用 YAML block scalar (|) 存入加密 Vault
+vault_multica_github_app_private_key: |
+  -----BEGIN RSA PRIVATE KEY-----
+  MIIEpAIBAAKCAQEA... (替换为 App Private keys 下载的完整 PEM)
+  -----END RSA PRIVATE KEY-----
+
 # Traefik Dashboard 认证用户名
 vault_traefik_dashboard_auth_user: "admin"
 
