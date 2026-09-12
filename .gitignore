@@ -2,6 +2,7 @@
 .ansible/
 .vault-password
 .sudo-password
+/.env
 *.pem
 *.key
 inventory/**/vault.yml
@@ -16,3 +17,9 @@ __pycache__/
 
 # Third-party Ansible Galaxy roles (installed via ansible-galaxy)
 roles/geerlingguy.*/
+
+# 本地工作笔记, 不入公开仓库
+/backlog.md
+/docs/research/
+/docs/runbooks/multica-personal-guide.md
+/docs/runbooks/sub2api-prompt-audit.md

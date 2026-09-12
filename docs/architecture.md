@@ -21,6 +21,7 @@ GitHub Repo (vps-ansible)
                     ├── docker_custom (proxy_net 网络)
                     ├── traefik (443 HTTPS 反向代理)
                     ├── sub2api (AI API 网关)
+                    ├── multica (AI 项目管理)
                     └── vaultwarden (密码库服务)
 ```
 
@@ -32,14 +33,16 @@ Internet
     ▼
 443 HTTPS ──→ Traefik (Docker)
                 │
-                ├── <YOUR_DOMAIN> → Vaultwarden
+                ├── vault.<YOUR_DOMAIN> → Vaultwarden
                 ├── api.<YOUR_DOMAIN> → Sub2API (AI API 网关)
-                ├── traefik.<YOUR_DOMAIN> → Traefik Dashboard (Basic Auth 保护)
+                ├── work.<YOUR_DOMAIN> → Multica (AI 项目管理, 按 Path 分流 backend/frontend)
+                ├── panel.<YOUR_DOMAIN> → Traefik Dashboard (Basic Auth 保护)
                 └── *.<YOUR_DOMAIN> → (未来服务)
                 │
                 └── proxy_net (10.203.57.0/24)
                         ├── Traefik (网关)
                         ├── Sub2API (后端 + PostgreSQL + Redis，不暴露端口)
+                        ├── Multica (backend + frontend；PostgreSQL 在专用 internal 网络 multica_db)
                         └── Vaultwarden (后端)
 ```
 
@@ -53,6 +56,7 @@ Internet
 | docker_custom | Custom Role | 创建共享 Docker 网络 proxy_net |
 | traefik | Custom Role | 反向代理、自动 HTTPS、路由发现 |
 | sub2api | Custom Role | AI API 网关（Sub2API + PostgreSQL + Redis） |
+| multica | Custom Role | AI 项目管理（Multica backend/frontend + pgvector PostgreSQL） |
 | vaultwarden | Custom Role | 密码库服务部署 |
 
 ### 证书管理
@@ -68,6 +72,7 @@ Internet
 |------|---------|-----------|
 | Vaultwarden | `/opt/stacks/vaultwarden/data` | 高 |
 | Sub2API | `/opt/stacks/sub2api/{data,postgres,redis}` | 高 |
+| Multica | `/opt/stacks/multica/{postgres,uploads}` | 高 |
 | Traefik ACME | `/opt/stacks/traefik/letsencrypt/acme.json` | 中 |
 
 ### 安全模型
@@ -118,7 +123,7 @@ Internet
    - 自动发现 Docker 容器路由
 
 2. **密码库**：`vaultwarden`
-   - 部署 Vaultwarden 1.35.7
+   - 部署 Vaultwarden 1.37.2
    - 配置 Traefik 标签实现 HTTPS 路由
    - 禁用公开注册 (`signups_allowed: false`)
    - 启用 WebSocket 支持
@@ -132,6 +137,14 @@ Internet
    - 通过 Traefik 标签路由：`https://api.<YOUR_DOMAIN>`
    - 固定 JWT_SECRET / TOTP_ENCRYPTION_KEY / 数据库密码，Ansible Vault 管理
    - 数据持久化：`/opt/stacks/sub2api/{data,postgres,redis}`
+
+4. **AI 项目管理**：`multica`
+   - 部署 Multica v0.4.43 (ghcr.io/multica-ai/{multica-backend,multica-web}) + pgvector/pgvector 0.8.6-pg17
+   - 单 origin `https://work.<YOUR_DOMAIN>`：Traefik 按 Path 分流，/api(/...) /uploads/ /v1/ /health /readyz /healthz /ws(/...) 与四个登录端点直达 backend，其余（页面、/auth/callback）走 frontend
+   - PostgreSQL 在专用 internal 网络 multica_db，不接 proxy_net；backend/frontend 接 proxy_net；容器不发布宿主端口
+   - 关闭新用户注册：`ALLOW_SIGNUP=false`，邮箱/域名白名单为空；未配邮件，已有用户的验证码打印在 backend 日志
+   - 固定 JWT_SECRET / PostgreSQL 密码，Ansible Vault 管理；GitHub App 的 slug/id/webhook secret/PEM 同样由 Vault 注入；其他自托管 VCS 集成保持关闭
+   - 数据持久化：`/opt/stacks/multica/{postgres,uploads}`
 
 ## GitOps 工作流
 
