@@ -1,0 +1,18 @@
+---
+- name: Manage Cloudflare DNS records
+  community.general.cloudflare_dns:
+    zone: "{{ cloudflare_dns_zone }}"
+    record: "{{ item.name }}"
+    type: "{{ item.type }}"
+    value: "{{ item.value }}"
+    ttl: "{{ item.ttl | default(1) }}"
+    proxied: "{{ item.proxied | default(omit) }}"
+    # solo: 该 name+type 只保留声明的这一条（删除多余值）
+    solo: true
+    state: present
+    api_token: "{{ cloudflare_dns_api_token }}"
+  # 记录级开关: 未启用的服务跳过创建/更新 (已存在记录不会被删除)
+  when: item.enabled | default(true) | bool
+  loop: "{{ cloudflare_dns_records }}"
+  loop_control:
+    label: "{{ item.name }}"

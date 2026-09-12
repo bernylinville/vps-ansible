@@ -47,6 +47,9 @@
       tags: [docker]
     - role: docker_custom
       tags: [docker]
+    - role: cloudflare_dns
+      when: cloudflare_dns_enabled | default(false) | bool
+      tags: [dns]
     - role: traefik
       when: traefik_enabled | bool
       tags: [traefik]

@@ -1,0 +1,7 @@
+---
+# zone 必填 (community.general.cloudflare_dns)，必须事先存在
+cloudflare_dns_zone: "{{ domain_name | default('example.com', true) }}"
+# 复用 DNS-01 的 token（同为 Zone:DNS:Edit 权限，无提权）
+cloudflare_dns_api_token: "{{ vault_traefik_cloudflare_dns_api_token }}"
+# 记录列表在 group_vars 定义；空列表时 role 为 no-op
+cloudflare_dns_records: []

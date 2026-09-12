@@ -55,6 +55,31 @@ traefik_acme_ca_server: https://acme-v02.api.letsencrypt.org/directory
 traefik_dashboard_subdomain: panel
 traefik_dashboard_domain: "{{ traefik_dashboard_subdomain }}.{{ domain_name }}"
 
+# Cloudflare DNS 管理 (community.general.cloudflare_dns，只管本仓库使用的记录，存量记录不碰)
+cloudflare_dns_enabled: true
+cloudflare_dns_records:
+  - name: "api.{{ domain_name }}"
+    type: A
+    value: "{{ vault_vps_host_ip }}"
+    proxied: true
+    ttl: 1
+  - name: "{{ traefik_dashboard_domain }}"
+    type: A
+    value: "{{ vault_vps_host_ip }}"
+    proxied: true
+    ttl: 1
+  - name: "{{ vaultwarden_hostname }}"
+    type: A
+    value: "{{ vault_vps_host_ip }}"
+    proxied: true
+    ttl: 1
+  - name: "{{ multica_hostname }}"
+    type: A
+    value: "{{ vault_vps_host_ip }}"
+    proxied: true
+    ttl: 1
+    enabled: "{{ multica_enabled | default(false) | bool }}"
+
 # Sub2API 配置
 sub2api_enabled: true
 sub2api_image_tag: "0.2.4"
