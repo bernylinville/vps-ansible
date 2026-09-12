@@ -26,6 +26,9 @@ services:
       - --entrypoints.web.http.redirections.entryPoint.scheme=https
       - --entrypoints.websecure.address=:443
       - --entrypoints.websecure.transport.respondingTimeouts.readTimeout={{ traefik_websecure_read_timeout }}
+{% if traefik_websecure_forwarded_trusted_ips | default([], true) | length > 0 %}
+      - --entrypoints.websecure.forwardedHeaders.trustedIPs={{ traefik_websecure_forwarded_trusted_ips | join(',') }}
+{% endif %}
       - --entrypoints.traefik.address=:8080
       - --certificatesresolvers.letsencrypt.acme.email={{ traefik_acme_email }}
       - --certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json

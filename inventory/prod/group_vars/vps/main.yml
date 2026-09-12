@@ -51,6 +51,9 @@ traefik_enabled: true
 traefik_image_tag: v3.7.13
 traefik_acme_email: "{{ vault_traefik_acme_email | default('admin@' + domain_name, true) }}"
 traefik_acme_ca_server: https://acme-v02.api.letsencrypt.org/directory
+# Dashboard 域名前缀用中性词，不暴露 traefik 身份
+traefik_dashboard_subdomain: panel
+traefik_dashboard_domain: "{{ traefik_dashboard_subdomain }}.{{ domain_name }}"
 
 # Sub2API 配置
 sub2api_enabled: true
