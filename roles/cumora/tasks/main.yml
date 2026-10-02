@@ -104,6 +104,14 @@
       cumora_env_result is changed or cumora_compose_result is changed or
       cumora_dependencies_result is changed
   block:
+    - name: Invalidate the matching cumora migration stamp before running the candidate
+      ansible.builtin.file:
+        path: "{{ cumora_migration_stamp_path }}"
+        state: absent
+      when:
+        - cumora_migration_stamp_stat.stat.exists
+        - (cumora_migration_stamp.content | default('') | b64decode | trim) == cumora_image
+
     - name: Run the candidate image migration and fail on nonzero exit
       community.docker.docker_compose_v2_run:
         project_src: "{{ cumora_stack_dir }}"

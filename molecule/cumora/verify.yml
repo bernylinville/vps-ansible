@@ -5,6 +5,7 @@
   vars:
     cumora_env_path: "{{ cumora_stack_dir }}/.env"
     cumora_migration_stamp_path: "{{ cumora_stack_dir }}/.migrated-image"
+    cumora_test_invalid_postgres_password: "fedcba9876543210fedcba9876543210"
   tasks:
     - name: Check secret file mode
       ansible.builtin.stat:
@@ -219,3 +220,104 @@
     - name: Retry the valid image after the failed deployment
       ansible.builtin.include_role:
         name: cumora
+
+    - name: Capture the healthy server before same-image migration failures
+      community.docker.docker_container_info:
+        name: "{{ cumora_server_container_name }}"
+      register: cumora_test_same_image_baseline
+      no_log: true
+
+    - name: Read the successful migration stamp before changing the password
+      ansible.builtin.slurp:
+        src: "{{ cumora_migration_stamp_path }}"
+      register: cumora_test_same_image_stamp
+
+    - name: Assert the same-image baseline is healthy and successfully migrated
+      ansible.builtin.assert:
+        that:
+          - cumora_test_same_image_baseline.container.State.Health.Status == 'healthy'
+          - cumora_test_same_image_baseline.container.Config.Image == cumora_image
+          - cumora_test_same_image_stamp.content | b64decode | trim == cumora_image
+      no_log: true
+
+    - name: Verify a same-image password change fails before replacing the server
+      block:
+        - name: Attempt the same image with an incorrect PostgreSQL password
+          ansible.builtin.include_role:
+            name: cumora
+          vars:
+            cumora_postgres_password: "{{ cumora_test_invalid_postgres_password }}"
+
+        - name: Fail if migration with the incorrect password unexpectedly succeeds
+          ansible.builtin.fail:
+            msg: The incorrect password must fail migration before server replacement.
+      rescue:
+        - name: Assert the password change failed at the migration command
+          ansible.builtin.assert:
+            that:
+              - ansible_failed_task.name == 'Run the candidate image migration and fail on nonzero exit'
+              - cumora_env_result is changed
+              - cumora_compose_result is not changed
+              - cumora_dependencies_result is changed
+
+    - name: Verify an identical same-image deployment retries the failed migration
+      block:
+        - name: Retry the same image with the same incorrect PostgreSQL password
+          ansible.builtin.include_role:
+            name: cumora
+          vars:
+            cumora_postgres_password: "{{ cumora_test_invalid_postgres_password }}"
+
+        - name: Fail if the identical invalid deployment unexpectedly succeeds
+          ansible.builtin.fail:
+            msg: An identical retry must fail migration before server replacement.
+      rescue:
+        - name: Assert migration was retried without configuration or dependency changes
+          ansible.builtin.assert:
+            that:
+              - ansible_failed_task.name == 'Run the candidate image migration and fail on nonzero exit'
+              - cumora_env_result is not changed
+              - cumora_compose_result is not changed
+              - cumora_dependencies_result is not changed
+
+    - name: Inspect the server after both same-image migration failures
+      community.docker.docker_container_info:
+        name: "{{ cumora_server_container_name }}"
+      register: cumora_test_same_image_after_failure
+      no_log: true
+
+    - name: Check the migration stamp after both same-image failures
+      ansible.builtin.stat:
+        path: "{{ cumora_migration_stamp_path }}"
+      register: cumora_test_same_image_failed_stamp
+
+    - name: Assert same-image failures preserve the server and invalidate its migration stamp
+      ansible.builtin.assert:
+        that:
+          - cumora_test_same_image_after_failure.container.Id == cumora_test_same_image_baseline.container.Id
+          - cumora_test_same_image_after_failure.container.State.Health.Status == 'healthy'
+          - not cumora_test_same_image_failed_stamp.stat.exists
+      no_log: true
+
+    - name: Restore the correct PostgreSQL password after the failed same-image retry
+      ansible.builtin.include_role:
+        name: cumora
+
+    - name: Inspect the server after restoring the correct password
+      community.docker.docker_container_info:
+        name: "{{ cumora_server_container_name }}"
+      register: cumora_test_same_image_recovered
+      no_log: true
+
+    - name: Read the successful migration stamp after recovery
+      ansible.builtin.slurp:
+        src: "{{ cumora_migration_stamp_path }}"
+      register: cumora_test_same_image_recovered_stamp
+
+    - name: Assert recovery starts a healthy server and records a successful migration
+      ansible.builtin.assert:
+        that:
+          - cumora_test_same_image_recovered.container.State.Health.Status == 'healthy'
+          - cumora_test_same_image_recovered.container.Config.Image == cumora_image
+          - cumora_test_same_image_recovered_stamp.content | b64decode | trim == cumora_image
+      no_log: true
