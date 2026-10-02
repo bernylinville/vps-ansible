@@ -3,6 +3,11 @@
   hosts: all
   gather_facts: false
   tasks:
+    - name: Check test stack directory exists even after partial cleanup
+      ansible.builtin.stat:
+        path: "{{ cumora_stack_dir }}"
+      register: cumora_test_stack
+
     - name: Check test compose exists
       ansible.builtin.stat:
         path: "{{ cumora_stack_dir }}/compose.yml"
@@ -16,18 +21,19 @@
       when: cumora_test_compose.stat.exists
       no_log: true
 
-    - name: Remove PostgreSQL-owned test data using an isolated helper container
+    # PostgreSQL 和应用附件可由容器 root/postgres 拥有；部分清理失败后 Compose 可能已不存在。
+    - name: Remove container-owned test data using an isolated helper container
       community.docker.docker_container:
         name: cumora-molecule-cleanup
         image: redis:7.2.16-alpine3.21
         entrypoint: [sh, -c]
-        command: ["rm -rf /cleanup/postgres"]
+        command: ["rm -rf /cleanup/postgres /cleanup/uploads"]
         volumes: ["{{ cumora_stack_dir }}:/cleanup"]
         network_mode: none
         detach: false
         cleanup: true
         state: started
-      when: cumora_test_compose.stat.exists
+      when: cumora_test_stack.stat.exists
 
     - name: Remove the test stack directory
       ansible.builtin.file:
