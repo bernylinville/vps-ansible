@@ -45,6 +45,18 @@ jobs:
         run: |
           ansible-galaxy install -r requirements.yml
 
+      - name: Reject outdated automatic deployments
+        if: github.event_name == 'workflow_run'
+        shell: bash
+        env:
+          DEPLOY_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          main_sha="$(git ls-remote --exit-code origin refs/heads/main | cut -f1)"
+          if [[ "$DEPLOY_SHA" != "$main_sha" ]]; then
+            echo "::error::CI commit $DEPLOY_SHA is no longer main HEAD ($main_sha); refusing deployment."
+            exit 1
+          fi
+
       - name: Setup SSH
         uses: webfactory/ssh-agent@v0.9.1
         with:

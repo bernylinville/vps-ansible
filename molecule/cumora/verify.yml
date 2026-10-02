@@ -3,10 +3,14 @@
   hosts: all
   gather_facts: false
   vars:
-    cumora_env_path: "{{ cumora_stack_dir }}/.env"
-    cumora_migration_stamp_path: "{{ cumora_stack_dir }}/.migrated-image"
     cumora_test_invalid_postgres_password: "fedcba9876543210fedcba9876543210"
   tasks:
+    - name: Load Cumora role defaults without deploying the stack
+      ansible.builtin.import_role:
+        name: cumora
+        public: true
+      when: false
+
     - name: Check secret file mode
       ansible.builtin.stat:
         path: "{{ cumora_env_path }}"

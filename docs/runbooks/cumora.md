@@ -11,8 +11,8 @@ Cumora 使用自有 fork `bernylinville/cumora` 构建的 GHCR 镜像。单个 s
 1. 在源码 fork 提交 PR，运行 typecheck 和实际 Docker build。
 2. CI 通过后合并到 fork 的 `main`，由 GitHub Actions 发布 `ghcr.io/bernylinville/cumora-server`。
 3. 首次发布后确认 GHCR package 为 Public，执行匿名 pull 验证。不要将本机 GitHub token 复制到 VPS。
-4. 将 workflow summary 中的不可变 `@sha256:...` 引用写入 `roles/cumora/defaults/main.yml` 的 `cumora_image`，并同步 Molecule 的 `cumora_default_test_image`。
-5. 在基础设施仓库运行 lint、语法检查、Molecule 和生产 check，通过 PR 合并到 `main`。`main` 的 CI 成功后触发部署 workflow，检出该次 CI 的 `head_sha`，使用生产 inventory 真正运行 Playbook（不带 `--check`）。功能分支 / PR 只跑 CI，不连接 VPS；手动部署入口仅允许 `main`。
+4. 将 workflow summary 中的不可变 `@sha256:...` 引用写入 `roles/cumora/defaults/main.yml` 的 `cumora_image`。Molecule 直接复用该默认值，不单独配置正常测试镜像。
+5. 在基础设施仓库运行 lint、语法检查、Molecule 和生产 check，通过 PR 合并到 `main`。`main` 的 CI 成功后触发部署 workflow，检出该次 CI 的 `head_sha`。自动部署取得并发锁后、准备 SSH 和生产凭据前，确认该 SHA 仍是远端 `main` 的最新提交；不一致或查询失败时中止，不改为检出未经 CI 验证的新提交。检查通过后，使用生产 inventory 真正运行 Playbook（不带 `--check`）。功能分支 / PR 只跑 CI，不连接 VPS；手动部署入口仍仅允许 `main`。
 
 VPS 不编译源码。镜像不包含 `.env`；运行配置由 Ansible 渲染，真实凭据只存放在加密 Vault 和 VPS 上权限 `0600` 的 `.env`。
 
@@ -62,10 +62,7 @@ check mode 不执行迁移或数据库写入。首次 check 不落盘配置，�
 
 Molecule 使用独立的本机 Docker 网络、容器名和 `/tmp/vps-ansible-cumora-molecule`，不读取生产 Vault。场景覆盖首次 check、真实数据库迁移、幂等、API/SPA/OAuth 入口、真实 Traefik IP 允许/拒绝和伪造头、持久化、迁移失败不替换旧服务、失败后重试。
 
-```bash
-# 可选：用已知本地构建镜像运行相同场景
-CUMORA_TEST_IMAGE=cumora-server:d0dbf16 mise run test-cumora
-```
+create 和 verify 使用 `import_role` 公开 Cumora 默认值，并以 `when: false` 跳过角色任务，避免在这两个阶段意外部署。默认值保留 role defaults 优先级，不覆盖测试 inventory 的目录、容器名和网络配置；verify 中用于失败保护的任务级镜像覆盖仍然生效。
 
 部署后检查 `cumora-server`、`cumora-postgres`、`cumora-redis` 容器健康状态，确认数据库和 Redis 未接入 `proxy_net`，所有容器没有宿主端口映射。
 

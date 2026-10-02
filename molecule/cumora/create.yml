@@ -3,6 +3,12 @@
   hosts: all
   gather_facts: false
   tasks:
+    - name: Load Cumora role defaults without deploying the stack
+      ansible.builtin.import_role:
+        name: cumora
+        public: true
+      when: false
+
     - name: Create external proxy network for the test stack only
       community.docker.docker_network:
         name: "{{ docker_custom_network_name }}"

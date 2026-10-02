@@ -171,6 +171,7 @@ Developer
                             │
                             └── main CI 成功 → GitHub Actions Deploy (检出 CI 的 head_sha)
                                     ├── 安装 Ansible
+                                    ├── 确认 CI 的 head_sha 仍是 main 最新提交，否则中止
                                     ├── 配置 SSH 密钥
                                     ├── 解密 Vault
                                     │
