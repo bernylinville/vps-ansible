@@ -1,0 +1,55 @@
+---
+- name: Destroy only the isolated Cumora test stack
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Check test stack directory exists even after partial cleanup
+      ansible.builtin.stat:
+        path: "{{ cumora_stack_dir }}"
+      register: cumora_test_stack
+
+    - name: Check test compose exists
+      ansible.builtin.stat:
+        path: "{{ cumora_stack_dir }}/compose.yml"
+      register: cumora_test_compose
+
+    - name: Remove test containers and internal network
+      community.docker.docker_compose_v2:
+        project_src: "{{ cumora_stack_dir }}"
+        state: absent
+        remove_orphans: true
+      when: cumora_test_compose.stat.exists
+      no_log: true
+
+    # PostgreSQL 和应用附件可由容器 root/postgres 拥有；部分清理失败后 Compose 可能已不存在。
+    - name: Remove container-owned test data using an isolated helper container
+      community.docker.docker_container:
+        name: cumora-molecule-cleanup
+        image: redis:7.2.16-alpine3.21
+        entrypoint: [sh, -c]
+        command: ["rm -rf /cleanup/postgres /cleanup/uploads"]
+        volumes: ["{{ cumora_stack_dir }}:/cleanup"]
+        network_mode: none
+        detach: false
+        cleanup: true
+        state: started
+      when: cumora_test_stack.stat.exists
+
+    - name: Remove the test stack directory
+      ansible.builtin.file:
+        path: "{{ cumora_stack_dir }}"
+        state: absent
+
+    - name: Remove only test gateway and client containers
+      community.docker.docker_container:
+        name: "{{ item }}"
+        state: absent
+      loop:
+        - cumora-molecule-traefik
+        - cumora-molecule-trusted-client
+        - cumora-molecule-untrusted-client
+
+    - name: Remove the test proxy network
+      community.docker.docker_network:
+        name: "{{ docker_custom_network_name }}"
+        state: absent

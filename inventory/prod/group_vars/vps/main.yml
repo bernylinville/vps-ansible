@@ -73,12 +73,12 @@ cloudflare_dns_records:
     value: "{{ vault_vps_host_ip }}"
     proxied: true
     ttl: 1
-  - name: "{{ multica_hostname }}"
+  - name: "{{ cumora_hostname }}"
     type: A
     value: "{{ vault_vps_host_ip }}"
     proxied: true
     ttl: 1
-    enabled: "{{ multica_enabled | default(false) | bool }}"
+    enabled: "{{ cumora_enabled | default(false) | bool }}"
 
 # Sub2API 配置
 sub2api_enabled: true
@@ -88,10 +88,15 @@ sub2api_redis_image_tag: "8.10.1-trixie"
 sub2api_hostname: "api.{{ domain_name }}"
 
 # Multica 配置 (AI 项目管理, 单 origin work.<domain>, 三容器: postgres/backend/frontend)
-multica_enabled: true
+multica_enabled: false
 multica_image_tag: "v0.4.43"
 multica_postgres_image_tag: "0.8.6-pg17-trixie"
 multica_subdomain: work
+
+# Cumora 配置 (同源 SPA/API/WebSocket，复用卸载后的 work.<domain>)
+cumora_enabled: true
+cumora_subdomain: work
+cumora_waitlist_enabled: true
 
 # Vaultwarden 配置
 vaultwarden_enabled: true

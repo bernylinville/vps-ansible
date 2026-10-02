@@ -59,9 +59,13 @@
     - role: sub2api
       when: sub2api_enabled | bool
       tags: [sub2api]
-    - role: multica
-      when: multica_enabled | default(false) | bool
-      tags: [multica]
+    # Multica 已卸载，保留 role 和旧数据以便回退；不要在自动部署中重新启用。
+    # - role: multica
+    #   when: multica_enabled | default(false) | bool
+    #   tags: [multica]
+    - role: cumora
+      when: cumora_enabled | default(false) | bool
+      tags: [cumora]
     - role: wireguard
       become: true
       tags: [wireguard]

@@ -13,6 +13,8 @@
     src: .env.j2
     dest: "{{ beszel_agent_env_path }}"
     mode: "0600"
+  no_log: true
+  diff: false
 
 - name: Render Beszel agent compose file
   ansible.builtin.template:
@@ -27,3 +29,4 @@
       - "{{ beszel_agent_compose_path }}"
     state: present
     pull: "{{ beszel_agent_image_pull_policy | default('always', true) }}"
+  no_log: true

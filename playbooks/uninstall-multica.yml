@@ -1,0 +1,10 @@
+---
+- name: Uninstall unused Multica without deleting its data
+  hosts: vps
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Run multica uninstall tasks independently of its enable flag
+      ansible.builtin.import_role:
+        name: multica
+        tasks_from: uninstall

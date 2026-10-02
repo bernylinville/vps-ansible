@@ -9,9 +9,9 @@ vps-ansible 采用 Ansible-first 的声明式基础设施管理，通过 GitOps 
 ```
 GitHub Repo (vps-ansible)
     │
-    ├── GitHub Actions CI (lint + syntax-check)
+    ├── GitHub Actions CI (PR / main push：lint + syntax-check + Cumora Molecule)
     │
-    └── GitHub Actions Deploy (workflow_dispatch / push main)
+    └── GitHub Actions Deploy (main CI 成功 / main 手动触发)
             │
             └── SSH (port <YOUR_SSH_PORT>) → VPS (<YOUR_VPS_IP>)
                     │
@@ -21,7 +21,7 @@ GitHub Repo (vps-ansible)
                     ├── docker_custom (proxy_net 网络)
                     ├── traefik (443 HTTPS 反向代理)
                     ├── sub2api (AI API 网关)
-                    ├── multica (AI 项目管理)
+                    ├── cumora (AI 团队协作；自有 GHCR 镜像)
                     └── vaultwarden (密码库服务)
 ```
 
@@ -35,14 +35,14 @@ Internet
                 │
                 ├── vault.<YOUR_DOMAIN> → Vaultwarden
                 ├── api.<YOUR_DOMAIN> → Sub2API (AI API 网关)
-                ├── work.<YOUR_DOMAIN> → Multica (AI 项目管理, 按 Path 分流 backend/frontend)
+                ├── work.<YOUR_DOMAIN> → Cumora (同源 SPA/API/WebSocket，IP 白名单)
                 ├── panel.<YOUR_DOMAIN> → Traefik Dashboard (Basic Auth 保护)
                 └── *.<YOUR_DOMAIN> → (未来服务)
                 │
                 └── proxy_net (10.203.57.0/24)
                         ├── Traefik (网关)
                         ├── Sub2API (后端 + PostgreSQL + Redis，不暴露端口)
-                        ├── Multica (backend + frontend；PostgreSQL 在专用 internal 网络 multica_db)
+                        ├── Cumora (server；PostgreSQL + Redis 仅接入专用 internal 网络)
                         └── Vaultwarden (后端)
 ```
 
@@ -56,7 +56,7 @@ Internet
 | docker_custom | Custom Role | 创建共享 Docker 网络 proxy_net |
 | traefik | Custom Role | 反向代理、自动 HTTPS、路由发现 |
 | sub2api | Custom Role | AI API 网关（Sub2API + PostgreSQL + Redis） |
-| multica | Custom Role | AI 项目管理（Multica backend/frontend + pgvector PostgreSQL） |
+| cumora | Custom Role | AI 团队协作（GHCR 单镜像 + pgvector PostgreSQL 18 + Redis），GitHub OAuth 与 IP 白名单 |
 | vaultwarden | Custom Role | 密码库服务部署 |
 
 ### 证书管理
@@ -72,7 +72,8 @@ Internet
 |------|---------|-----------|
 | Vaultwarden | `/opt/stacks/vaultwarden/data` | 高 |
 | Sub2API | `/opt/stacks/sub2api/{data,postgres,redis}` | 高 |
-| Multica | `/opt/stacks/multica/{postgres,uploads}` | 高 |
+| Cumora | `/opt/stacks/cumora/{postgres,uploads}` | 高 |
+| Multica（已卸载） | `/opt/stacks/multica/{postgres,uploads}`（仅保留旧数据） | 回退保留 |
 | Traefik ACME | `/opt/stacks/traefik/letsencrypt/acme.json` | 中 |
 
 ### 安全模型
@@ -81,6 +82,7 @@ Internet
 2. **主机层**：SSH 密钥认证、非标准端口、Fail2ban
 3. **容器层**：Docker 网络隔离、最小权限原则
 4. **密钥层**：Ansible Vault 加密、GitHub Secrets 管理
+5. **Cumora 入口**：先校验连接来源属于 Cloudflare，再以 X-Forwarded-For 最右端 IP 校验用户白名单；Traefik 只信任 Cloudflare 网段的转发头，阻断直连源站和伪造头
 
 ## 部署流程
 
@@ -138,13 +140,16 @@ Internet
    - 固定 JWT_SECRET / TOTP_ENCRYPTION_KEY / 数据库密码，Ansible Vault 管理
    - 数据持久化：`/opt/stacks/sub2api/{data,postgres,redis}`
 
-4. **AI 项目管理**：`multica`
-   - 部署 Multica v0.4.43 (ghcr.io/multica-ai/{multica-backend,multica-web}) + pgvector/pgvector 0.8.6-pg17
-   - 单 origin `https://work.<YOUR_DOMAIN>`：Traefik 按 Path 分流，/api(/...) /uploads/ /v1/ /health /readyz /healthz /ws(/...) 与四个登录端点直达 backend，其余（页面、/auth/callback）走 frontend
-   - PostgreSQL 在专用 internal 网络 multica_db，不接 proxy_net；backend/frontend 接 proxy_net；容器不发布宿主端口
-   - 关闭新用户注册：`ALLOW_SIGNUP=false`，邮箱/域名白名单为空；未配邮件，已有用户的验证码打印在 backend 日志
-   - 固定 JWT_SECRET / PostgreSQL 密码，Ansible Vault 管理；GitHub App 的 slug/id/webhook secret/PEM 同样由 Vault 注入；其他自托管 VCS 集成保持关闭
-   - 数据持久化：`/opt/stacks/multica/{postgres,uploads}`
+4. **AI 团队协作**：`cumora`
+   - 源码 fork：`bernylinville/cumora`；GitHub Actions 使用上游 Dockerfile 构建前端 + API 镜像，发布 `ghcr.io/bernylinville/cumora-server`；Ansible 固定 digest，不在 VPS 构建源码
+   - 单 origin `https://work.<YOUR_DOMAIN>`：页面、`/api/`、`/runtime/`、uploads 与 WebSocket 统一走 server 的 5181 端口
+   - Cumora router 在两层 IPAllowList 外统一覆盖 `Cache-Control: private, no-store`，防止附件及静态响应被边缘缓存后绕过白名单；Cloudflare 不得忽略该策略，已有缓存须清理
+   - PostgreSQL 18.6 / pgvector 0.8.6 与 Redis 7.2.16 仅接专用 internal 网络；只有 server 接 proxy_net，所有容器均不发布宿主端口
+   - 先启动数据库和 Redis，用候选镜像执行一次 `npm run migrate`；成功后记录镜像并启动 server，失败不替换旧 server；应用启动仅校验 schema
+   - GitHub OAuth 凭据、PostgreSQL 密码、runtime 签名密钥、管理员邮箱及 IP 白名单由 Vault 管理；非管理员新用户进入 waitlist
+   - 仅提供 Compose 服务和 BYOA 接入，不提供依赖 Kubernetes 的云端 agent Pods；默认无云端 LLM 凭据
+   - 数据持久化：`/opt/stacks/cumora/{postgres,uploads}`；PG18 挂载 `/var/lib/postgresql` 父目录，Redis 不持久化
+   - Multica 已卸载，`site.yml` 中的 role 入口注释禁用；旧配置和数据保留用于回退，原 `work` 域名改由 Cumora 使用
 
 ## GitOps 工作流
 
@@ -160,12 +165,15 @@ Developer
             └── GitHub Actions CI
                     ├── yamllint
                     ├── ansible-lint
-                    └── syntax-check
+                    ├── syntax-check
+                    └── Cumora Molecule (真实 Compose、迁移、持久化、Traefik IP 白名单)
                     │
                     └── ✅ Pass → Merge to main
                             │
-                            └── GitHub Actions Deploy
+                            └── main CI 成功 → GitHub Actions Deploy (检出 CI 的 head_sha)
+                                    ├── queue: max 串行排队（最多 100 个 pending run）
                                     ├── 安装 Ansible
+                                    ├── 确认 CI 的 head_sha 仍是 main 最新提交，否则中止
                                     ├── 配置 SSH 密钥
                                     ├── 解密 Vault
                                     │

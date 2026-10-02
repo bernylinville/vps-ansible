@@ -1,0 +1,593 @@
+---
+- name: Verify real Cumora Compose behavior
+  hosts: all
+  gather_facts: false
+  vars:
+    cumora_test_invalid_postgres_password: "fedcba9876543210fedcba9876543210"
+    cumora_test_attachment_name: molecule-cache-probe.png
+    cumora_test_attachment_base64: iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=
+  tasks:
+    - name: Load Cumora role defaults without deploying the stack
+      ansible.builtin.import_role:
+        name: cumora
+        public: true
+      when: false
+
+    - name: Check secret file mode
+      ansible.builtin.stat:
+        path: "{{ cumora_env_path }}"
+      register: cumora_test_env
+
+    - name: Inspect real server, PostgreSQL and Redis containers
+      community.docker.docker_container_info:
+        name: "{{ item }}"
+      loop:
+        - "{{ cumora_server_container_name }}"
+        - "{{ cumora_postgres_container_name }}"
+        - "{{ cumora_redis_container_name }}"
+      register: cumora_test_containers
+
+    - name: Assert health, port isolation, network boundaries and secret permissions
+      ansible.builtin.assert:
+        that:
+          - cumora_test_env.stat.mode == '0600'
+          - item.exists
+          - item.container.State.Health.Status == 'healthy'
+          - item.container.HostConfig.PortBindings | default({}, true) | length == 0
+          - >-
+            (docker_custom_network_name in item.container.NetworkSettings.Networks) ==
+            (item.item == cumora_server_container_name)
+          - cumora_project_name + '_' + cumora_internal_network_name in item.container.NetworkSettings.Networks
+      loop: "{{ cumora_test_containers.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+      no_log: true
+
+    - name: Exercise the API, SPA, OAuth boundary and Compose secret decoding
+      community.docker.docker_container_exec:
+        container: "{{ cumora_server_container_name }}"
+        argv:
+          - node
+          - --input-type=module
+          - -e
+          - |
+            import assert from 'node:assert/strict';
+            const base = 'http://127.0.0.1:5181';
+            const health = await fetch(base + '/api/health');
+            assert.equal(health.status, 200);
+            assert.equal((await health.json()).ok, true);
+            const root = await fetch(base + '/');
+            assert.equal(root.status, 200);
+            assert.match(root.headers.get('content-type'), /text\/html/);
+            assert.match(await root.text(), /<div id="root"><\/div>/);
+            const providers = await fetch(base + '/api/auth/providers');
+            assert.deepEqual((await providers.json()).providers, ['github']);
+            const me = await fetch(base + '/api/auth/me');
+            assert.equal(me.status, 401);
+            const denied = await fetch(base + '/api/auth/start/github?return=https://evil.example.test/');
+            assert.equal(denied.status, 400);
+            const login = await fetch(base + '/api/auth/start/github', {redirect: 'manual'});
+            assert.equal(login.status, 302);
+            const auth = new URL(login.headers.get('location'));
+            assert.equal(auth.origin, 'https://github.com');
+            assert.equal(auth.searchParams.get('redirect_uri'), process.env.CUMORA_PUBLIC_ORIGIN + '/api/auth/callback/github');
+            assert.equal(process.env.OPENAI_API_KEY, 'molecule-key-with-$-and-quotes-"-no-provider-calls');
+            console.log('API, SPA, OAuth and environment decoding passed');
+      changed_when: false
+
+    - name: Create and read an actual PNG attachment in the isolated uploads volume
+      community.docker.docker_container_exec:
+        container: "{{ cumora_server_container_name }}"
+        argv:
+          - node
+          - --input-type=module
+          - -e
+          - |
+            import assert from 'node:assert/strict';
+            import {mkdirSync, writeFileSync} from 'node:fs';
+            const png = Buffer.from('{{ cumora_test_attachment_base64 }}', 'base64');
+            mkdirSync('/app/server/uploads/attachments', {recursive: true});
+            writeFileSync('/app/server/uploads/attachments/{{ cumora_test_attachment_name }}', png);
+            const response = await fetch('http://127.0.0.1:5181/uploads/attachments/{{ cumora_test_attachment_name }}');
+            assert.equal(response.status, 200);
+            assert.match(response.headers.get('content-type'), /^image\/png/);
+            assert.deepEqual(Buffer.from(await response.arrayBuffer()), png);
+      changed_when: true
+
+    - name: Exercise real Traefik cache policy and IP allowlist from trusted and untrusted peers
+      community.docker.docker_container_exec:
+        container: "{{ item }}"
+        argv:
+          - node
+          - --input-type=module
+          - -e
+          - |
+            import assert from 'node:assert/strict';
+            import https from 'node:https';
+            const trusted = '{{ item }}' === 'cumora-molecule-trusted-client';
+            const attachment = '/uploads/attachments/{{ cumora_test_attachment_name }}';
+            const png = Buffer.from('{{ cumora_test_attachment_base64 }}', 'base64');
+            const request = async (path, forwarded, {method = 'GET', headers = {}} = {}) => {
+              const response = await new Promise((resolve, reject) => {
+                // Test-only Traefik has its default self-signed certificate; production probes validate TLS.
+                const req = https.request({hostname: '10.247.98.2', port: 443, path, method,
+                  rejectUnauthorized: false, headers: {host: 'work.example.test',
+                    'x-forwarded-for': forwarded, 'cf-connecting-ip': '203.0.113.10', ...headers}}, res => {
+                  const chunks = [];
+                  res.on('data', chunk => chunks.push(chunk));
+                  res.on('error', reject);
+                  res.on('end', () => resolve({status: res.statusCode, headers: res.headers, body: Buffer.concat(chunks)}));
+                });
+                req.on('error', reject); req.end();
+              });
+              assert.equal(response.headers['cache-control'], 'private, no-store', 'cache policy: ' + path);
+              return response;
+            };
+            if (trusted) {
+              const root = await request('/', '203.0.113.10');
+              assert.equal(root.status, 200);
+              const asset = root.body.toString().match(/<script[^>]+src="([^"]+\.js)"/);
+              assert.ok(asset, 'SPA must reference a JavaScript bundle');
+              const assetPath = new URL(asset[1], 'https://work.example.test/').pathname;
+              const bundle = await request(assetPath, '203.0.113.10');
+              assert.equal(bundle.status, 200);
+              assert.match(bundle.headers['content-type'], /javascript/);
+              assert.equal((await request(assetPath, '203.0.113.99')).status, 403);
+              assert.equal((await request('/api/health', '198.51.100.20')).status, 200);
+              assert.equal((await request('/api/auth/me', '203.0.113.10')).status, 401);
+              assert.equal((await request('/api/auth/start/github', '203.0.113.10')).status, 302);
+              assert.equal((await request('/', '203.0.113.10, 203.0.113.99')).status, 403, 'use rightmost XFF');
+              const image = await request(attachment, '203.0.113.10');
+              assert.equal(image.status, 200);
+              assert.match(image.headers['content-type'], /^image\/png/);
+              assert.deepEqual(image.body, png);
+              const repeated = await request(attachment + '?download=1', '203.0.113.10');
+              assert.equal(repeated.status, 200);
+              assert.deepEqual(repeated.body, png);
+              const head = await request(attachment, '203.0.113.10', {method: 'HEAD'});
+              assert.equal(head.status, 200);
+              assert.equal(head.body.length, 0);
+              const partial = await request(attachment, '203.0.113.10', {headers: {range: 'bytes=0-7'}});
+              assert.equal(partial.status, 206);
+              assert.deepEqual(partial.body, png.subarray(0, 8));
+              assert.ok(image.headers.etag);
+              const unchanged = await request(attachment, '203.0.113.10', {headers: {'if-none-match': image.headers.etag}});
+              assert.equal(unchanged.status, 304);
+              assert.equal(unchanged.body.length, 0);
+              assert.equal((await request('/uploads/attachments/molecule-missing.png', '203.0.113.10')).status, 404);
+            }
+            const paths = ['/', '/api/health', '/api/auth/start/github', '/runtime/inbox', '/ws', attachment, attachment + '?download=1'];
+            for (const path of paths) {
+              assert.equal((await request(path, '203.0.113.99')).status, 403, 'non-allowlisted client: ' + path);
+              if (!trusted) {
+                assert.equal((await request(path, '203.0.113.10')).status, 403, 'untrusted peer with forged headers: ' + path);
+              }
+            }
+            console.log('Traefik no-store, attachment bytes, allow/deny and spoofing boundary passed');
+      loop:
+        - cumora-molecule-trusted-client
+        - cumora-molecule-untrusted-client
+      register: cumora_test_allowlist
+      until: cumora_test_allowlist is succeeded
+      retries: 10
+      delay: 2
+      changed_when: false
+
+    - name: Verify real migration ledger, pgvector and closed registration policy
+      community.docker.docker_container_exec:
+        container: "{{ cumora_postgres_container_name }}"
+        argv:
+          - psql
+          - -U
+          - cumora
+          - -d
+          - cumora
+          - -v
+          - ON_ERROR_STOP=1
+          - -qAt
+          - -c
+          - >-
+            SELECT (SELECT COUNT(*) > 0 FROM schema_migrations)
+              AND EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector')
+              AND EXISTS (SELECT 1 FROM app_settings WHERE key = 'waitlist_enabled' AND value = 'true'::jsonb);
+      register: cumora_test_database
+      changed_when: false
+
+    - name: Assert schema and signup policy are ready before traffic
+      ansible.builtin.assert:
+        that: cumora_test_database.stdout | trim == 't'
+
+    - name: Save a persistence sentinel in uploads
+      community.docker.docker_container_exec:
+        container: "{{ cumora_server_container_name }}"
+        argv: [node, -e, "require('fs').writeFileSync('/app/server/uploads/molecule-sentinel', 'persistent')"]
+      changed_when: true
+
+    - name: Restart all test services
+      community.docker.docker_compose_v2:
+        project_src: "{{ cumora_stack_dir }}"
+        state: restarted
+        services: [postgres, redis, server]
+      no_log: true
+
+    # Compose restart 不支持 --wait；另用 up --wait 等待数据库和应用真正就绪。
+    - name: Wait for health after restart
+      community.docker.docker_compose_v2:
+        project_src: "{{ cumora_stack_dir }}"
+        state: present
+        services: [postgres, redis, server]
+        wait: true
+        wait_timeout: 180
+        pull: never
+      no_log: true
+
+    - name: Verify PostgreSQL and uploads persist across restart
+      community.docker.docker_container_exec:
+        container: "{{ cumora_server_container_name }}"
+        argv:
+          - node
+          - --input-type=module
+          - -e
+          - |
+            import assert from 'node:assert/strict';
+            import {readFileSync} from 'node:fs';
+            assert.equal(readFileSync('/app/server/uploads/molecule-sentinel', 'utf8'), 'persistent');
+            const r = await fetch('http://127.0.0.1:5181/api/public/signup-config');
+            assert.equal((await r.json()).waitlist_enabled, true);
+      changed_when: false
+
+    - name: Capture running server identity before a failing candidate migration
+      community.docker.docker_container_info:
+        name: "{{ cumora_server_container_name }}"
+      register: cumora_test_baseline
+      no_log: true
+
+    - name: Verify migration failure stops the candidate without replacing the server
+      block:
+        - name: Attempt to deploy an image without npm as a failing migration candidate
+          ansible.builtin.include_role:
+            name: cumora
+          vars:
+            cumora_image: redis:7.2.16-alpine3.21
+
+        - name: Fail if the invalid migration unexpectedly succeeds
+          ansible.builtin.fail:
+            msg: The invalid candidate must fail before server replacement.
+      rescue:
+        - name: Assert failure came from the migration command
+          ansible.builtin.assert:
+            that:
+              - ansible_failed_task.name == 'Run the candidate image migration and fail on nonzero exit'
+
+        - name: Inspect server after failed migration
+          community.docker.docker_container_info:
+            name: "{{ cumora_server_container_name }}"
+          register: cumora_test_after_failure
+          no_log: true
+
+        - name: Read successful migration stamp after failure
+          ansible.builtin.slurp:
+            src: "{{ cumora_migration_stamp_path }}"
+          register: cumora_test_stamp
+
+        - name: Assert failed migration did not replace the server or overwrite the success stamp
+          ansible.builtin.assert:
+            that:
+              - cumora_test_after_failure.container.Id == cumora_test_baseline.container.Id
+              - cumora_test_after_failure.container.State.Health.Status == 'healthy'
+              - cumora_test_stamp.content | b64decode | trim == cumora_image
+          no_log: true
+
+    - name: Retry the valid image after the failed deployment
+      ansible.builtin.include_role:
+        name: cumora
+
+    - name: Capture the healthy server before same-image migration failures
+      community.docker.docker_container_info:
+        name: "{{ cumora_server_container_name }}"
+      register: cumora_test_same_image_baseline
+      no_log: true
+
+    - name: Read the successful migration stamp before changing the password
+      ansible.builtin.slurp:
+        src: "{{ cumora_migration_stamp_path }}"
+      register: cumora_test_same_image_stamp
+
+    - name: Assert the same-image baseline is healthy and successfully migrated
+      ansible.builtin.assert:
+        that:
+          - cumora_test_same_image_baseline.container.State.Health.Status == 'healthy'
+          - cumora_test_same_image_baseline.container.Config.Image == cumora_image
+          - cumora_test_same_image_stamp.content | b64decode | trim == cumora_image
+      no_log: true
+
+    - name: Verify a same-image password change fails before replacing the server
+      block:
+        - name: Attempt the same image with an incorrect PostgreSQL password
+          ansible.builtin.include_role:
+            name: cumora
+          vars:
+            cumora_postgres_password: "{{ cumora_test_invalid_postgres_password }}"
+
+        - name: Fail if migration with the incorrect password unexpectedly succeeds
+          ansible.builtin.fail:
+            msg: The incorrect password must fail migration before server replacement.
+      rescue:
+        - name: Assert the password change failed at the migration command
+          ansible.builtin.assert:
+            that:
+              - ansible_failed_task.name == 'Run the candidate image migration and fail on nonzero exit'
+              - cumora_env_result is changed
+              - cumora_compose_result is not changed
+              - cumora_dependencies_result is changed
+
+    - name: Verify an identical same-image deployment retries the failed migration
+      block:
+        - name: Retry the same image with the same incorrect PostgreSQL password
+          ansible.builtin.include_role:
+            name: cumora
+          vars:
+            cumora_postgres_password: "{{ cumora_test_invalid_postgres_password }}"
+
+        - name: Fail if the identical invalid deployment unexpectedly succeeds
+          ansible.builtin.fail:
+            msg: An identical retry must fail migration before server replacement.
+      rescue:
+        - name: Assert migration was retried without configuration or dependency changes
+          ansible.builtin.assert:
+            that:
+              - ansible_failed_task.name == 'Run the candidate image migration and fail on nonzero exit'
+              - cumora_env_result is not changed
+              - cumora_compose_result is not changed
+              - cumora_dependencies_result is not changed
+
+    - name: Inspect the server after both same-image migration failures
+      community.docker.docker_container_info:
+        name: "{{ cumora_server_container_name }}"
+      register: cumora_test_same_image_after_failure
+      no_log: true
+
+    - name: Check the migration stamp after both same-image failures
+      ansible.builtin.stat:
+        path: "{{ cumora_migration_stamp_path }}"
+      register: cumora_test_same_image_failed_stamp
+
+    - name: Assert same-image failures preserve the server and invalidate its migration stamp
+      ansible.builtin.assert:
+        that:
+          - cumora_test_same_image_after_failure.container.Id == cumora_test_same_image_baseline.container.Id
+          - cumora_test_same_image_after_failure.container.State.Health.Status == 'healthy'
+          - not cumora_test_same_image_failed_stamp.stat.exists
+      no_log: true
+
+    - name: Restore the correct PostgreSQL password after the failed same-image retry
+      ansible.builtin.include_role:
+        name: cumora
+
+    - name: Inspect the server after restoring the correct password
+      community.docker.docker_container_info:
+        name: "{{ cumora_server_container_name }}"
+      register: cumora_test_same_image_recovered
+      no_log: true
+
+    - name: Read the successful migration stamp after recovery
+      ansible.builtin.slurp:
+        src: "{{ cumora_migration_stamp_path }}"
+      register: cumora_test_same_image_recovered_stamp
+
+    - name: Assert recovery starts a healthy server and records a successful migration
+      ansible.builtin.assert:
+        that:
+          - cumora_test_same_image_recovered.container.State.Health.Status == 'healthy'
+          - cumora_test_same_image_recovered.container.Config.Image == cumora_image
+          - cumora_test_same_image_recovered_stamp.content | b64decode | trim == cumora_image
+      no_log: true
+
+    - name: Verify a dependency failure invalidates the stamp even without configuration changes
+      block:
+        - name: Attempt unchanged configuration against an unavailable test Docker socket
+          ansible.builtin.include_role:
+            name: cumora
+            apply:
+              environment:
+                DOCKER_HOST: "unix://{{ cumora_stack_dir }}/unavailable-docker.sock"
+
+        - name: Fail if the unavailable Docker socket unexpectedly succeeds
+          ansible.builtin.fail:
+            msg: Dependency preparation must fail with an unavailable Docker socket.
+      rescue:
+        - name: Assert the unchanged deployment failed during dependency preparation
+          ansible.builtin.assert:
+            that:
+              - ansible_failed_task.name == 'Start cumora database and Redis before migration'
+              - cumora_env_result is not changed
+              - cumora_compose_result is not changed
+              - cumora_dependencies_result is failed
+
+        - name: Check the stamp after dependency failure without configuration changes
+          ansible.builtin.stat:
+            path: "{{ cumora_migration_stamp_path }}"
+          register: cumora_test_unchanged_dependency_stamp
+
+        - name: Assert dependency failure alone invalidated the matching stamp
+          ansible.builtin.assert:
+            that: not cumora_test_unchanged_dependency_stamp.stat.exists
+
+    - name: Recover using the available Docker socket and unchanged configuration
+      ansible.builtin.include_role:
+        name: cumora
+
+    - name: Verify a Compose render failure invalidates an already written environment change
+      block:
+        - name: Attempt a password change with an undefined Compose network
+          ansible.builtin.include_role:
+            name: cumora
+          vars:
+            cumora_postgres_password: "{{ cumora_test_invalid_postgres_password }}"
+            cumora_network_name: "{{ undef('Intentional Molecule Compose rendering failure') }}"
+
+        - name: Fail if the undefined Compose network unexpectedly succeeds
+          ansible.builtin.fail:
+            msg: Compose rendering must fail after the environment change.
+      rescue:
+        - name: Assert the environment was written before Compose rendering failed
+          ansible.builtin.assert:
+            that:
+              - ansible_failed_task.name == 'Render cumora compose file'
+              - cumora_env_result is changed
+
+        - name: Check the stamp after the Compose rendering failure
+          ansible.builtin.stat:
+            path: "{{ cumora_migration_stamp_path }}"
+          register: cumora_test_compose_failure_stamp
+
+        - name: Assert the failed configuration phase invalidated the matching stamp
+          ansible.builtin.assert:
+            that: not cumora_test_compose_failure_stamp.stat.exists
+
+    - name: Restore valid configuration after the Compose rendering failure
+      ansible.builtin.include_role:
+        name: cumora
+
+    - name: Capture the healthy server before the dependency timeout
+      community.docker.docker_container_info:
+        name: "{{ cumora_server_container_name }}"
+      register: cumora_test_dependency_baseline
+      no_log: true
+
+    - name: Read the successful stamp before the dependency timeout
+      ansible.builtin.slurp:
+        src: "{{ cumora_migration_stamp_path }}"
+      register: cumora_test_dependency_baseline_stamp
+
+    - name: Assert the dependency-timeout baseline is healthy and successfully migrated
+      ansible.builtin.assert:
+        that:
+          - cumora_test_dependency_baseline.container.State.Health.Status == 'healthy'
+          - cumora_test_dependency_baseline.container.Config.Image == cumora_image
+          - cumora_test_dependency_baseline_stamp.content | b64decode | trim == cumora_image
+      no_log: true
+
+    - name: Disable only the isolated Redis healthcheck executable
+      community.docker.docker_container_exec:
+        container: "{{ cumora_redis_container_name }}"
+        argv: [mv, /usr/local/bin/redis-cli, /usr/local/bin/redis-cli.molecule-disabled]
+      changed_when: true
+
+    - name: Verify a dependency timeout stops the changed same-image deployment
+      block:
+        - name: Restart only Redis to reset its health status
+          community.docker.docker_compose_v2:
+            project_src: "{{ cumora_stack_dir }}"
+            services: [redis]
+            state: restarted
+          no_log: true
+
+        - name: Attempt the password change while Redis cannot pass its healthcheck
+          ansible.builtin.include_role:
+            name: cumora
+          vars:
+            cumora_postgres_password: "{{ cumora_test_invalid_postgres_password }}"
+            cumora_wait_timeout: 2
+
+        - name: Fail if unhealthy dependencies unexpectedly pass preparation
+          ansible.builtin.fail:
+            msg: Dependency preparation must time out before migration or server replacement.
+      rescue:
+        - name: Assert the changed deployment failed at the original dependency task
+          ansible.builtin.assert:
+            that:
+              - ansible_failed_task.name == 'Start cumora database and Redis before migration'
+              - cumora_env_result is changed
+              - cumora_compose_result is not changed
+              - cumora_dependencies_result is failed
+
+        - name: Check the stamp immediately after the dependency timeout
+          ansible.builtin.stat:
+            path: "{{ cumora_migration_stamp_path }}"
+          register: cumora_test_dependency_failed_stamp
+
+        - name: Assert the dependency timeout left no matching success stamp
+          ansible.builtin.assert:
+            that: not cumora_test_dependency_failed_stamp.stat.exists
+      always:
+        - name: Restore the isolated Redis healthcheck executable
+          community.docker.docker_container_exec:
+            container: "{{ cumora_redis_container_name }}"
+            argv: [mv, /usr/local/bin/redis-cli.molecule-disabled, /usr/local/bin/redis-cli]
+          changed_when: true
+
+    - name: Wait for dependencies to recover without changing the candidate configuration
+      community.docker.docker_container_info:
+        name: "{{ item }}"
+      loop:
+        - "{{ cumora_postgres_container_name }}"
+        - "{{ cumora_redis_container_name }}"
+      register: cumora_test_dependency_health
+      until: cumora_test_dependency_health.exists and cumora_test_dependency_health.container.State.Health.Status == 'healthy'
+      retries: 30
+      delay: 2
+      no_log: true
+
+    - name: Verify the identical deployment retries migration after the dependency timeout
+      block:
+        - name: Retry the same password and timeout after dependency recovery
+          ansible.builtin.include_role:
+            name: cumora
+          vars:
+            cumora_postgres_password: "{{ cumora_test_invalid_postgres_password }}"
+            cumora_wait_timeout: 2
+
+        - name: Fail if the retry unexpectedly bypasses the invalid password
+          ansible.builtin.fail:
+            msg: The recovered dependencies must not allow migration to be skipped.
+      rescue:
+        - name: Assert the retry reached migration without configuration or dependency changes
+          ansible.builtin.assert:
+            that:
+              - ansible_failed_task.name == 'Run the candidate image migration and fail on nonzero exit'
+              - cumora_env_result is not changed
+              - cumora_compose_result is not changed
+              - cumora_dependencies_result is not changed
+
+    - name: Inspect the server after retrying the timed-out deployment
+      community.docker.docker_container_info:
+        name: "{{ cumora_server_container_name }}"
+      register: cumora_test_dependency_retry_server
+      no_log: true
+
+    - name: Check the stamp after retrying the timed-out deployment
+      ansible.builtin.stat:
+        path: "{{ cumora_migration_stamp_path }}"
+      register: cumora_test_dependency_retry_stamp
+
+    - name: Assert the dependency timeout and failed retry preserved the healthy server
+      ansible.builtin.assert:
+        that:
+          - cumora_test_dependency_retry_server.container.Id == cumora_test_dependency_baseline.container.Id
+          - cumora_test_dependency_retry_server.container.State.Health.Status == 'healthy'
+          - not cumora_test_dependency_retry_stamp.stat.exists
+      no_log: true
+
+    - name: Restore the correct password after the dependency-timeout regression
+      ansible.builtin.include_role:
+        name: cumora
+
+    - name: Inspect the recovered server after the dependency-timeout regression
+      community.docker.docker_container_info:
+        name: "{{ cumora_server_container_name }}"
+      register: cumora_test_dependency_recovered_server
+      no_log: true
+
+    - name: Read the successful migration stamp after dependency-timeout recovery
+      ansible.builtin.slurp:
+        src: "{{ cumora_migration_stamp_path }}"
+      register: cumora_test_dependency_recovered_stamp
+
+    - name: Assert dependency-timeout recovery restored health and the successful stamp
+      ansible.builtin.assert:
+        that:
+          - cumora_test_dependency_recovered_server.container.State.Health.Status == 'healthy'
+          - cumora_test_dependency_recovered_server.container.Config.Image == cumora_image
+          - cumora_test_dependency_recovered_stamp.content | b64decode | trim == cumora_image
+      no_log: true

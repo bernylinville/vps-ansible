@@ -1,5 +1,9 @@
 # Multica 运维手册
 
+> Multica 已从 VPS 卸载，`playbooks/site.yml` 中的入口已注释，`multica_enabled: false`。容器和专用网络已移除；`/opt/stacks/multica` 下的配置、PostgreSQL 和 uploads 数据保留以便回退。原 `work` 入口由 [Cumora](cumora.md) 接管。以下内容仅供旧数据回退使用，恢复前须先停止 Cumora，避免同域名路由冲突。
+
+独立卸载命令：`ansible-playbook -i inventory/prod/hosts.yml playbooks/uninstall-multica.yml`。此命令不删除持久化目录或 volumes。
+
 Multica 自托管实例（AI 项目管理）：单 origin `https://work.<YOUR_DOMAIN>`，三容器 `postgres` / `multica-backend` / `multica-frontend`。
 
 手动配置个人 Workspace、Project、Agent、Skills 与 GitHub 集成，见 [单人使用手册](multica-personal-guide.md)。注册策略已配置为禁止所有新账号；GitHub App 变量已接入角色，仓库安装授权通过工作区设置完成。

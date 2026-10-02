@@ -1,0 +1,183 @@
+---
+- name: Assert cumora secrets and configuration are valid
+  ansible.builtin.assert:
+    that:
+      - cumora_postgres_password is match('^[0-9a-f]{32,}$')
+      - cumora_agent_runtime_secret | length >= 32
+      - cumora_agent_runtime_secret is not match('CHANGEME|dev-agent-runtime-secret')
+      - cumora_openai_api_key | length > 0
+      - cumora_openai_api_key is not match('CHANGEME')
+      - cumora_github_client_id | length > 0
+      - cumora_github_client_secret | length > 0
+      - cumora_github_client_id is not match('CHANGEME|TO_FILL|YOUR_')
+      - cumora_github_client_secret is not match('CHANGEME|TO_FILL|YOUR_')
+      - cumora_allowed_ips is sequence
+      - cumora_allowed_ips is not string
+      - cumora_allowed_ips is not mapping
+      - cumora_allowed_ips | length > 0
+      - cumora_ingress_proxy_ips | length > 0
+      - cumora_admin_emails is sequence
+      - cumora_admin_emails is not string
+      - cumora_admin_emails is not mapping
+      - cumora_admin_emails | length > 0
+      - cumora_postgres_user is match('^[a-z][a-z0-9_]*$')
+      - cumora_postgres_db is match('^[a-z][a-z0-9_]*$')
+      - cumora_image is not match('.*:(latest|main)$')
+    fail_msg: Cumora 需要固定镜像、随机密钥、GitHub OAuth、管理员邮箱和非空 IP 白名单。
+  no_log: true
+
+- name: Create cumora stack directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0700"
+  loop:
+    - "{{ cumora_stack_dir }}"
+    - "{{ cumora_uploads_dir }}"
+
+# PG18 挂载父目录，entrypoint 只 chown 18/docker；父目录须允许 postgres 遍历。
+# PGDATA 自身仍由镜像设置 0700，宿主 stack 父目录保持 0700。
+- name: Create PostgreSQL 18 parent directory with traversal permission
+  ansible.builtin.file:
+    path: "{{ cumora_postgres_data_dir }}"
+    state: directory
+    mode: "0711"
+
+- name: Check last successful cumora migration image
+  ansible.builtin.stat:
+    path: "{{ cumora_migration_stamp_path }}"
+  register: cumora_migration_stamp_stat
+
+- name: Read last successful cumora migration image
+  ansible.builtin.slurp:
+    src: "{{ cumora_migration_stamp_path }}"
+  register: cumora_migration_stamp
+  when: cumora_migration_stamp_stat.stat.exists
+
+- name: Prepare cumora configuration before dependencies
+  block:
+    - name: Render cumora environment file
+      ansible.builtin.template:
+        src: .env.j2
+        dest: "{{ cumora_env_path }}"
+        mode: "0600"
+      register: cumora_env_result
+      no_log: true
+      diff: false
+
+    - name: Render cumora compose file
+      ansible.builtin.template:
+        src: compose.yml.j2
+        dest: "{{ cumora_compose_path }}"
+        mode: "0644"
+      register: cumora_compose_result
+      diff: false
+  always:
+    - name: Invalidate the matching cumora migration stamp after configuration changes or failure
+      ansible.builtin.file:
+        path: "{{ cumora_migration_stamp_path }}"
+        state: absent
+      when:
+        - not ansible_check_mode
+        - cumora_migration_stamp_stat.stat.exists
+        - (cumora_migration_stamp.content | default('') | b64decode | trim) == cumora_image
+        - >-
+          cumora_env_result is changed or cumora_env_result is failed or
+          cumora_compose_result is changed or cumora_compose_result is failed
+
+- name: Check cumora compose file exists
+  ansible.builtin.stat:
+    path: "{{ cumora_compose_path }}"
+  register: cumora_compose_stat
+
+- name: Explain check-mode skip on fresh host
+  ansible.builtin.debug:
+    msg: 首次 check mode 不落盘 Compose，跳过编排；迁移和数据库写入仅在真实部署执行。
+  when: ansible_check_mode and not cumora_compose_stat.stat.exists
+
+- name: Prepare cumora dependencies before migration
+  block:
+    - name: Start cumora database and Redis before migration
+      community.docker.docker_compose_v2:
+        project_src: "{{ cumora_stack_dir }}"
+        files: ["{{ cumora_compose_path }}"]
+        services: [postgres, redis]
+        state: present
+        pull: "{{ cumora_image_pull_policy }}"
+        wait: true
+        wait_timeout: "{{ cumora_wait_timeout }}"
+      register: cumora_dependencies_result
+      when: not ansible_check_mode or cumora_compose_stat.stat.exists
+      no_log: true
+  always:
+    - name: Invalidate the matching cumora migration stamp after dependency changes or failure
+      ansible.builtin.file:
+        path: "{{ cumora_migration_stamp_path }}"
+        state: absent
+      when:
+        - not ansible_check_mode
+        - cumora_migration_stamp_stat.stat.exists
+        - (cumora_migration_stamp.content | default('') | b64decode | trim) == cumora_image
+        - cumora_dependencies_result is changed or cumora_dependencies_result is failed
+
+# 仅在成功后写标记；失败后重跑仍会迁移，不能依赖 template.changed 作为唯一条件。
+- name: Migrate cumora schema before starting the candidate server
+  when:
+    - not ansible_check_mode
+    - >-
+      not cumora_migration_stamp_stat.stat.exists or
+      (cumora_migration_stamp.content | default('') | b64decode | trim) != cumora_image or
+      cumora_env_result is changed or cumora_compose_result is changed or
+      cumora_dependencies_result is changed
+  block:
+    - name: Run the candidate image migration and fail on nonzero exit
+      community.docker.docker_compose_v2_run:
+        project_src: "{{ cumora_stack_dir }}"
+        files: ["{{ cumora_compose_path }}"]
+        profiles: [tools]
+        service: migrate
+        cleanup: true
+        no_deps: true
+      no_log: true
+
+    - name: Record the successfully migrated cumora image
+      ansible.builtin.copy:
+        content: "{{ cumora_image }}\n"
+        dest: "{{ cumora_migration_stamp_path }}"
+        mode: "0600"
+
+# 上游注册策略存在 DB app_settings 中，不是环境变量；管理员 allowlist 可绕过 waitlist。
+- name: Enforce cumora waitlist policy before exposing the server
+  community.docker.docker_container_exec:
+    container: "{{ cumora_postgres_container_name }}"
+    argv:
+      - psql
+      - -U
+      - "{{ cumora_postgres_user }}"
+      - -d
+      - "{{ cumora_postgres_db }}"
+      - -v
+      - ON_ERROR_STOP=1
+      - -qAt
+    stdin: >-
+      INSERT INTO app_settings (key, value)
+      VALUES ('waitlist_enabled', '{{ cumora_waitlist_enabled | bool | lower }}'::jsonb)
+      ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
+      WHERE app_settings.value IS DISTINCT FROM EXCLUDED.value
+      RETURNING key;
+  register: cumora_signup_policy
+  changed_when: cumora_signup_policy.stdout | trim | length > 0
+  when: not ansible_check_mode
+  no_log: true
+
+- name: Start cumora server and wait for database-backed health
+  community.docker.docker_compose_v2:
+    project_src: "{{ cumora_stack_dir }}"
+    files: ["{{ cumora_compose_path }}"]
+    services: [server]
+    state: present
+    pull: "{{ cumora_image_pull_policy }}"
+    wait: true
+    wait_timeout: "{{ cumora_wait_timeout }}"
+  when: not ansible_check_mode or cumora_compose_stat.stat.exists
+  no_log: true

@@ -10,6 +10,8 @@
 # 在 VPS 上创建备份脚本
 sudo tee /usr/local/bin/backup-vps.sh << 'EOF'
 #!/bin/bash
+set -euo pipefail
+umask 077
 BACKUP_DIR="/backup/$(date +%Y%m%d_%H%M%S)"
 mkdir -p "$BACKUP_DIR"
 
@@ -21,15 +23,17 @@ docker exec sub2api-postgres pg_dump -U sub2api -d sub2api -Fc \
   > "$BACKUP_DIR/sub2api-postgres.dump"
 tar czf "$BACKUP_DIR/sub2api-data.tar.gz" -C /opt/stacks/sub2api data
 
-# 备份 Multica (PostgreSQL 逻辑备份 -Fc 自带压缩 + 本地附件; 一致性要求时先停 backend)
-docker exec multica-postgres pg_dump -U multica -d multica -Fc \
-  > "$BACKUP_DIR/multica-postgres.dump"
-tar czf "$BACKUP_DIR/multica-uploads.tar.gz" -C /opt/stacks/multica uploads
+# 备份 Cumora (一致性要求时先停 server，保留数据库运行)
+docker exec cumora-postgres pg_dump -U cumora -d cumora -Fc \
+  > "$BACKUP_DIR/cumora-postgres.dump"
+tar czf "$BACKUP_DIR/cumora-uploads.tar.gz" -C /opt/stacks/cumora uploads
+# Multica 容器已卸载；旧数据保留在 /opt/stacks/multica，不再对旧容器执行 pg_dump。
 
 # 备份 Traefik 证书
 tar czf "$BACKUP_DIR/traefik-certs.tar.gz" -C /opt/stacks/traefik letsencrypt
 
-# 备份 Ansible 库存 (加密状态)
+# 归档运行配置 (包含明文 .env，须作为敏感备份加密保存；不是加密 Ansible inventory)
+# 运行中的数据库目录副本不能代替上面的 pg_dump。
 cp -r /opt/stacks "$BACKUP_DIR/"
 
 echo "Backup completed: $BACKUP_DIR"
@@ -51,10 +55,9 @@ ssh -p <YOUR_SSH_PORT> <YOUR_USER>@<YOUR_VPS_IP> "sudo tar czf - /opt/stacks/vau
 ssh -p <YOUR_SSH_PORT> <YOUR_USER>@<YOUR_VPS_IP> "docker exec sub2api-postgres pg_dump -U sub2api -d sub2api -Fc" > sub2api-db-$(date +%Y%m%d).dump
 ssh -p <YOUR_SSH_PORT> <YOUR_USER>@<YOUR_VPS_IP> "sudo tar czf - /opt/stacks/sub2api/data" > sub2api-data-$(date +%Y%m%d).tar.gz
 
-# 备份 Multica (PostgreSQL 逻辑备份 -Fc 自带压缩 + 本地附件; 一致性要求时先停 backend)
-# 归档用相对路径 uploads/ (-C), 与恢复步骤的解压目录对应
-ssh -p <YOUR_SSH_PORT> <YOUR_USER>@<YOUR_VPS_IP> "docker exec multica-postgres pg_dump -U multica -d multica -Fc" > multica-db-$(date +%Y%m%d).dump
-ssh -p <YOUR_SSH_PORT> <YOUR_USER>@<YOUR_VPS_IP> "sudo tar czf - -C /opt/stacks/multica uploads" > multica-uploads-$(date +%Y%m%d).tar.gz
+# 备份 Cumora (一致性要求时先停 server；归档相对路径 uploads/ 与恢复目录对应)
+ssh -p <YOUR_SSH_PORT> <YOUR_USER>@<YOUR_VPS_IP> "docker exec cumora-postgres pg_dump -U cumora -d cumora -Fc" > cumora-db-$(date +%Y%m%d).dump
+ssh -p <YOUR_SSH_PORT> <YOUR_USER>@<YOUR_VPS_IP> "sudo tar czf - -C /opt/stacks/cumora uploads" > cumora-uploads-$(date +%Y%m%d).tar.gz
 
 # 备份 Traefik 证书
 ssh -p <YOUR_SSH_PORT> <YOUR_USER>@<YOUR_VPS_IP> "sudo tar czf - /opt/stacks/traefik/letsencrypt" > traefik-certs-backup-$(date +%Y%m%d).tar.gz
@@ -76,36 +79,35 @@ ssh -p <YOUR_SSH_PORT> <YOUR_USER>@<YOUR_VPS_IP> "sudo rm -rf /opt/stacks/vaultw
 ssh -p <YOUR_SSH_PORT> <YOUR_USER>@<YOUR_VPS_IP> "docker start vaultwarden"
 ```
 
-### 恢复 Multica
+### 恢复 Cumora
 
-前置：备份必须来自同一版本镜像（迁移 forward-only），且 Vault 中 `vault_multica_jwt_secret` 不变（否则全部会话/daemon 令牌失效）。
+前置：选择与备份 schema 兼容的镜像 digest；镜像回退不会撤销已经执行的数据库迁移。保留原 Vault 密钥，暂停自动部署，保存当前数据库备份。以下恢复会覆盖目标库中的备份同名对象和数据；不要在数据库仍有业务写入时执行。
 
-约定：已选定单个备份文件并上传到 VPS 的 `/tmp/multica-restore.dump` 与 `/tmp/multica-uploads-restore.tar.gz`（勿用通配符匹配多份备份）。以下全程在 VPS 上执行：
+约定：单个备份文件已上传到 VPS 的 `/tmp/cumora-restore.dump` 与 `/tmp/cumora-uploads-restore.tar.gz`。不要用通配符匹配多份备份。以下命令在 VPS 上执行：
 
 ```bash
-# 1. 停 frontend/backend (postgres 保持运行)
-cd /opt/stacks/multica && docker compose -f compose.yml stop multica-frontend multica-backend
+# 1. 停应用，保留 PostgreSQL/Redis 运行
+cd /opt/stacks/cumora
+docker compose -f compose.yml stop server
 
-# 2. 确认 postgres 可用
-docker exec multica-postgres pg_isready -U multica -d multica
+# 2. 确认 PostgreSQL 就绪并恢复；失败时停止，不要启动 server
+docker exec cumora-postgres pg_isready -U cumora -d cumora
+docker exec -i cumora-postgres pg_restore -U cumora -d cumora \
+  --clean --if-exists --exit-on-error < /tmp/cumora-restore.dump
 
-# 3. 恢复数据库 (--clean --if-exists 先删后建, 会覆盖目标库全部数据)
-docker exec -i multica-postgres pg_restore -U multica -d multica \
-  --clean --if-exists --exit-on-error < /tmp/multica-restore.dump
+# 3. 检查可信归档只包含 uploads/，保留旧附件后恢复
+tar tzf /tmp/cumora-uploads-restore.tar.gz
+sudo mv uploads uploads.bak-$(date +%Y%m%d%H%M%S)
+sudo mkdir -m 0700 uploads
+sudo tar xzf /tmp/cumora-uploads-restore.tar.gz -C /opt/stacks/cumora
 
-# 4. 验证归档层级为 uploads/... 后, mv 保存旧目录再解压 (失败可回退)
-tar tzf /tmp/multica-uploads-restore.tar.gz | head -3
-sudo mv /opt/stacks/multica/uploads /opt/stacks/multica/uploads.bak-$(date +%Y%m%d%H%M%S)
-sudo mkdir -m 0700 /opt/stacks/multica/uploads
-sudo tar xzf /tmp/multica-uploads-restore.tar.gz -C /opt/stacks/multica
-
-# 5. 起栈并验证 (backend 启动会先跑迁移)
-cd /opt/stacks/multica && docker compose -f compose.yml up -d
-curl -fsS https://work.<YOUR_DOMAIN>/readyz
-# 期望 {"status":"ok","checks":{"db":"ok","migrations":"ok"}}
+# 4. 使下次 Ansible 部署重新校验并运行候选镜像迁移
+sudo rm -f /opt/stacks/cumora/.migrated-image
 ```
 
-验证通过后再清理：`sudo rm -rf /opt/stacks/multica/uploads.bak-*`。
+确认 Ansible 中的镜像 digest 与恢复方案一致，再执行 Cumora 部署。部署后从允许的代理出口请求 `GET https://work.<YOUR_DOMAIN>/api/health`，预期 `200` 且 JSON `ok: true`；保留证书校验，并验证登录和附件。确认恢复成功后再清理本次生成的旧附件目录，勿用通配符批量删除历史备份。
+
+已卸载的 Multica 仅保留旧数据；如需恢复，先停止 Cumora，按 [Multica 手册](multica.md) 恢复，避免同域名路由冲突。
 
 ### 恢复 Traefik 证书
 
