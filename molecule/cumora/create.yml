@@ -1,0 +1,45 @@
+---
+- name: Create isolated Cumora test network
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Create external proxy network for the test stack only
+      community.docker.docker_network:
+        name: "{{ docker_custom_network_name }}"
+        ipam_config:
+          - subnet: 10.247.98.0/24
+        state: present
+
+    - name: Reserve trusted and untrusted proxy client addresses
+      community.docker.docker_container:
+        name: "{{ item.name }}"
+        image: "{{ cumora_image }}"
+        entrypoint: [node]
+        command: [-e, "setInterval(() => {}, 10000000)"]
+        network_mode: "{{ docker_custom_network_name }}"
+        networks:
+          - name: "{{ docker_custom_network_name }}"
+            ipv4_address: "{{ item.ip }}"
+        state: started
+      loop:
+        - {name: cumora-molecule-trusted-client, ip: 10.247.98.3}
+        - {name: cumora-molecule-untrusted-client, ip: 10.247.98.4}
+      no_log: true
+
+    - name: Start a real Traefik with the same trusted-forwarding boundary
+      community.docker.docker_container:
+        name: cumora-molecule-traefik
+        image: traefik:v3.7.13
+        command:
+          - --providers.docker=true
+          - --providers.docker.exposedbydefault=false
+          - --providers.docker.network={{ docker_custom_network_name }}
+          - '--providers.docker.constraints=Label(`com.docker.compose.project`, `cumora-molecule`)'
+          - --entrypoints.websecure.address=:443
+          - --entrypoints.websecure.forwardedHeaders.trustedIPs=10.247.98.3/32
+        volumes: [/var/run/docker.sock:/var/run/docker.sock:ro]
+        network_mode: "{{ docker_custom_network_name }}"
+        networks:
+          - name: "{{ docker_custom_network_name }}"
+            ipv4_address: 10.247.98.2
+        state: started

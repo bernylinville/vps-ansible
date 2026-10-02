@@ -1,0 +1,100 @@
+name: "{{ cumora_project_name }}"
+
+x-runtime: &runtime
+  image: "{{ cumora_image }}"
+  security_opt:
+    - no-new-privileges:true
+  env_file:
+    - "{{ cumora_env_path }}"
+  networks:
+    - "{{ cumora_internal_network_name }}"
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+
+services:
+  postgres:
+    image: "{{ cumora_postgres_image }}"
+    container_name: "{{ cumora_postgres_container_name }}"
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required}
+      TZ: ${TZ:-UTC}
+    volumes:
+      # PostgreSQL 18 的 PGDATA 在 /var/lib/postgresql/18/docker，挂载父目录。
+      - "{{ cumora_postgres_data_dir }}:/var/lib/postgresql"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 24
+    networks:
+      - "{{ cumora_internal_network_name }}"
+
+  redis:
+    image: "{{ cumora_redis_image }}"
+    container_name: "{{ cumora_redis_container_name }}"
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    # PG 是持久化边界；Redis 仅作 pubsub/队列/OAuth state，不持久化。
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 24
+    networks:
+      - "{{ cumora_internal_network_name }}"
+
+  migrate:
+    <<: *runtime
+    profiles: [tools]
+    restart: "no"
+    command: ["npm", "run", "migrate"]
+
+  server:
+    <<: *runtime
+    container_name: "{{ cumora_server_container_name }}"
+    restart: unless-stopped
+    volumes:
+      - "{{ cumora_uploads_dir }}:/app/server/uploads"
+    networks:
+      - "{{ cumora_internal_network_name }}"
+      - "{{ cumora_network_name }}"
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:5181/api/health').then(async r => {if (!r.ok || !(await r.json()).ok) process.exit(1)}).catch(() => process.exit(1))"
+      interval: 15s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: "{{ cumora_network_name }}"
+      traefik.http.routers.cumora.rule: 'Host("{{ cumora_hostname }}")'
+      traefik.http.routers.cumora.entrypoints: websecure
+      traefik.http.routers.cumora.tls.certresolver: letsencrypt
+      traefik.http.routers.cumora.service: cumora
+      # edge 使用连接来源，阻断直连源站；clients 使用可信 CF 的最右端 XFF。
+      traefik.http.routers.cumora.middlewares: cumora-edge,cumora-clients
+      traefik.http.middlewares.cumora-edge.ipallowlist.sourcerange: "{{ cumora_ingress_proxy_ips | join(',') }}"
+      traefik.http.middlewares.cumora-clients.ipallowlist.sourcerange: "{{ cumora_allowed_ips | join(',') }}"
+      traefik.http.middlewares.cumora-clients.ipallowlist.ipstrategy.depth: "1"
+      traefik.http.services.cumora.loadbalancer.server.port: "5181"
+
+networks:
+  {{ cumora_network_name }}:
+    external: true
+    name: "{{ cumora_network_name }}"
+  {{ cumora_internal_network_name }}:
+    internal: true

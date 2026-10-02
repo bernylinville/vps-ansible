@@ -1,0 +1,41 @@
+---
+# 单镜像提供 API / SPA / WebSocket；云端 agent Pods 不在 Compose 部署范围内。
+cumora_enabled: false
+cumora_project_name: cumora
+cumora_stack_dir: /opt/stacks/cumora
+cumora_env_path: "{{ cumora_stack_dir }}/.env"
+cumora_compose_path: "{{ cumora_stack_dir }}/compose.yml"
+cumora_postgres_data_dir: "{{ cumora_stack_dir }}/postgres"
+cumora_uploads_dir: "{{ cumora_stack_dir }}/uploads"
+cumora_migration_stamp_path: "{{ cumora_stack_dir }}/.migrated-image"
+
+# 生产和 CI 均使用公开 GHCR 镜像；部署固定 digest，不跟随 main/latest。
+cumora_image: ghcr.io/bernylinville/cumora-server:sha-d0dbf160be6533535cf482cc9e6e9f96eb957c3f
+cumora_postgres_image: pgvector/pgvector:pg18@sha256:2ba9ca5f2e7daa0f0e7723cba1ee9167bab54efd3640516a44ac1a928dd67e7a
+cumora_redis_image: redis:7.2.16-alpine3.21
+cumora_image_pull_policy: missing
+cumora_server_container_name: cumora-server
+cumora_postgres_container_name: cumora-postgres
+cumora_redis_container_name: cumora-redis
+
+cumora_subdomain: work
+cumora_hostname: "{{ cumora_subdomain }}.{{ domain_name | default('example.com', true) }}"
+cumora_public_origin: "https://{{ cumora_hostname }}"
+cumora_network_name: "{{ docker_custom_network_name }}"
+cumora_internal_network_name: cumora_internal
+# 两层入口校验：直连必须来自 Cloudflare，再取其 XFF 最右端客户端 IP。
+cumora_ingress_proxy_ips: "{{ traefik_websecure_forwarded_trusted_ips | default([]) }}"
+cumora_allowed_ips: "{{ vault_cumora_allowed_ips }}"
+cumora_tz: "{{ timezone | default('UTC', true) }}"
+
+cumora_postgres_user: cumora
+cumora_postgres_db: cumora
+cumora_postgres_password: "{{ vault_cumora_postgres_password }}"
+cumora_agent_runtime_secret: "{{ vault_cumora_agent_runtime_secret }}"
+cumora_openai_api_key: "{{ vault_cumora_openai_api_key }}"
+cumora_github_client_id: "{{ vault_cumora_github_client_id }}"
+cumora_github_client_secret: "{{ vault_cumora_github_client_secret }}"
+cumora_admin_emails: "{{ vault_cumora_admin_emails }}"
+# 非管理员的新账号进入 waitlist，管理员邮箱可直接完成首次 OAuth 登录。
+cumora_waitlist_enabled: true
+cumora_wait_timeout: 180

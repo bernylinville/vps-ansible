@@ -13,6 +13,7 @@
 - **反向代理**：Traefik v3 提供自动化 HTTPS (Let's Encrypt DNS-01 Challenge)
 - **密码管理**：Vaultwarden 1.37.2 自托管密码库
 - **AI API 网关**：Sub2API 0.2.4 (PostgreSQL + Redis)，Traefik 自动 HTTPS
+- **AI 团队协作**：Cumora 自有 fork 构建 GHCR 镜像，GitHub OAuth 登录，入口 IP 白名单
 - **GitOps Ready**：GitHub Actions 自动部署，Ansible Vault 保护敏感数据
 
 ## 快速开始
@@ -65,8 +66,11 @@ mise run check
 # 实际执行
 mise run deploy
 
-# 运行 Molecule 测试
+# 运行默认 Molecule 测试
 mise run test
+
+# 运行 Cumora 定向测试（实际 Compose、迁移、持久化、Traefik IP 白名单）
+mise run test-cumora
 
 # 编辑 Vault 文件
 mise run vault-edit
@@ -86,7 +90,8 @@ mise run vault-edit
 │   └── host_vars/            # 主机级变量
 │       └── <host-name>/      # 单主机覆盖
 ├── playbooks/
-│   └── site.yml              # 主入口 Playbook
+│   ├── site.yml              # 主入口 Playbook
+│   └── uninstall-multica.yml # 移除 Multica 容器，保留旧数据
 ├── roles/
 │   ├── docker/               # Docker Engine 安装 (Debian 13)
 │   ├── security/             # SSH 加固 + fail2ban + 自动更新 (Debian 13)
@@ -94,7 +99,8 @@ mise run vault-edit
 │   ├── docker_custom/        # Docker 共享网络
 │   ├── traefik/              # Traefik 反向代理
 │   ├── sub2api/              # Sub2API AI API 网关 (PostgreSQL + Redis)
-│   ├── multica/              # Multica AI 项目管理 (PostgreSQL + backend + frontend)
+│   ├── cumora/               # Cumora (GHCR 单镜像 + pgvector PostgreSQL 18 + Redis)
+│   ├── multica/              # 已卸载，保留 role 和数据以便回退
 │   └── vaultwarden/          # Vaultwarden 密码库
 ├── requirements.yml          # Ansible 集合依赖
 ├── requirements.txt          # Python 依赖
@@ -114,7 +120,8 @@ mise run vault-edit
 | `docker_custom` | 创建共享 Docker 网络 `proxy_net`，供多个服务共用 |
 | `traefik` | Traefik v3 反向代理，支持 HTTPS (Let's Encrypt DNS-01)，带 Basic Auth 保护的 Dashboard |
 | `sub2api` | Sub2API AI API 网关，三容器接入 proxy_net，数据库/缓存不暴露端口，密钥全部 Vault 管理 |
-| `multica` | Multica AI 项目管理，单 origin work.<domain>，postgres/backend/frontend 三容器，关闭新用户注册，GitHub App 配置由 Vault 管理 |
+| `cumora` | Cumora 团队协作，单 origin work.<domain>，GitHub OAuth + IP 白名单，独立数据库网络；非管理员新用户进入 waitlist |
+| `multica` | 已卸载且主入口注释禁用；保留实现和旧数据，不自动重新部署 |
 | `vaultwarden` | Vaultwarden 密码管理器，禁用公开注册，通过 Admin Token 管理 |
 
 **注意**：已移除所有第三方 roles (`geerlingguy.*`)，所有基础功能现在由本地 roles 实现，避免仓库污染。
@@ -126,11 +133,13 @@ mise run vault-edit
 - Traefik v3.6.10
 - Vaultwarden 1.37.2
 - Sub2API 0.2.4 + PostgreSQL 18.6 + Redis 8.10
-- Multica v0.4.43 (multica-backend + multica-web) + pgvector 0.8.6-pg17
+- Cumora (bernylinville/cumora → GitHub Actions → GHCR digest) + pgvector 0.8.6 / PostgreSQL 18.6 + Redis 7.2.16
 - Let's Encrypt (Cloudflare DNS-01)
 - mise (Python 3.13.12 版本管理)
 - uv (Python 包管理)
 - Molecule + Docker (测试框架，使用 Debian 13 容器)
+
+Cumora 的 OAuth App 注册、镜像升级、访问白名单和回退说明见 [Cumora 运维手册](docs/runbooks/cumora.md)。
 
 ## 许可证
 

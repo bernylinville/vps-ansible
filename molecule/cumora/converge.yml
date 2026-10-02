@@ -1,0 +1,6 @@
+---
+- name: Converge Cumora against the local Docker daemon
+  hosts: all
+  gather_facts: false
+  roles:
+    - role: cumora

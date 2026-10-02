@@ -1,0 +1,54 @@
+---
+driver:
+  name: default
+platforms:
+  - name: localhost
+provisioner:
+  name: ansible
+  config_options:
+    defaults:
+      roles_path: "${MOLECULE_PROJECT_DIRECTORY}/roles"
+  inventory:
+    host_vars:
+      localhost:
+        ansible_connection: local
+        ansible_become: false
+        ansible_python_interpreter: "{{ ansible_playbook_python }}"
+        cumora_stack_dir: /tmp/vps-ansible-cumora-molecule
+        cumora_project_name: cumora-molecule
+        cumora_image: "{{ lookup('env', 'CUMORA_TEST_IMAGE') | default(cumora_default_test_image, true) }}"
+        # 更新为与 role 相同的不可变 GHCR 镜像；本地可用 CUMORA_TEST_IMAGE 覆盖。
+        cumora_default_test_image: ghcr.io/bernylinville/cumora-server:sha-d0dbf160be6533535cf482cc9e6e9f96eb957c3f
+        cumora_server_container_name: cumora-molecule-server
+        cumora_postgres_container_name: cumora-molecule-postgres
+        cumora_redis_container_name: cumora-molecule-redis
+        docker_custom_network_name: cumora_molecule_proxy
+        cumora_internal_network_name: cumora_molecule_internal
+        domain_name: example.test
+        timezone: UTC
+        vault_cumora_postgres_password: "0123456789abcdef0123456789abcdef"
+        vault_cumora_agent_runtime_secret: "molecule-runtime-secret-0123456789abcdef"
+        vault_cumora_openai_api_key: "molecule-key-with-$$-and-quotes-\"-no-provider-calls"
+        vault_cumora_github_client_id: molecule-client-id
+        vault_cumora_github_client_secret: molecule-client-secret
+        vault_cumora_admin_emails: [admin@example.test]
+        vault_cumora_allowed_ips: [203.0.113.10/32, 198.51.100.20/32]
+        traefik_websecure_forwarded_trusted_ips: [10.247.98.3/32]
+        cumora_waitlist_enabled: true
+  playbooks:
+    create: create.yml
+    converge: converge.yml
+    verify: verify.yml
+    destroy: destroy.yml
+verifier:
+  name: ansible
+scenario:
+  test_sequence:
+    - destroy
+    - syntax
+    - create
+    - check
+    - converge
+    - idempotence
+    - verify
+    - destroy

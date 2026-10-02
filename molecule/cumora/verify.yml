@@ -1,0 +1,221 @@
+---
+- name: Verify real Cumora Compose behavior
+  hosts: all
+  gather_facts: false
+  vars:
+    cumora_env_path: "{{ cumora_stack_dir }}/.env"
+    cumora_migration_stamp_path: "{{ cumora_stack_dir }}/.migrated-image"
+  tasks:
+    - name: Check secret file mode
+      ansible.builtin.stat:
+        path: "{{ cumora_env_path }}"
+      register: cumora_test_env
+
+    - name: Inspect real server, PostgreSQL and Redis containers
+      community.docker.docker_container_info:
+        name: "{{ item }}"
+      loop:
+        - "{{ cumora_server_container_name }}"
+        - "{{ cumora_postgres_container_name }}"
+        - "{{ cumora_redis_container_name }}"
+      register: cumora_test_containers
+
+    - name: Assert health, port isolation, network boundaries and secret permissions
+      ansible.builtin.assert:
+        that:
+          - cumora_test_env.stat.mode == '0600'
+          - item.exists
+          - item.container.State.Health.Status == 'healthy'
+          - item.container.HostConfig.PortBindings | default({}, true) | length == 0
+          - >-
+            (docker_custom_network_name in item.container.NetworkSettings.Networks) ==
+            (item.item == cumora_server_container_name)
+          - cumora_project_name + '_' + cumora_internal_network_name in item.container.NetworkSettings.Networks
+      loop: "{{ cumora_test_containers.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+      no_log: true
+
+    - name: Exercise the API, SPA, OAuth boundary and Compose secret decoding
+      community.docker.docker_container_exec:
+        container: "{{ cumora_server_container_name }}"
+        argv:
+          - node
+          - --input-type=module
+          - -e
+          - |
+            import assert from 'node:assert/strict';
+            const base = 'http://127.0.0.1:5181';
+            const health = await fetch(base + '/api/health');
+            assert.equal(health.status, 200);
+            assert.equal((await health.json()).ok, true);
+            const root = await fetch(base + '/');
+            assert.equal(root.status, 200);
+            assert.match(root.headers.get('content-type'), /text\/html/);
+            assert.match(await root.text(), /<div id="root"><\/div>/);
+            const providers = await fetch(base + '/api/auth/providers');
+            assert.deepEqual((await providers.json()).providers, ['github']);
+            const me = await fetch(base + '/api/auth/me');
+            assert.equal(me.status, 401);
+            const denied = await fetch(base + '/api/auth/start/github?return=https://evil.example.test/');
+            assert.equal(denied.status, 400);
+            const login = await fetch(base + '/api/auth/start/github', {redirect: 'manual'});
+            assert.equal(login.status, 302);
+            const auth = new URL(login.headers.get('location'));
+            assert.equal(auth.origin, 'https://github.com');
+            assert.equal(auth.searchParams.get('redirect_uri'), process.env.CUMORA_PUBLIC_ORIGIN + '/api/auth/callback/github');
+            assert.equal(process.env.OPENAI_API_KEY, 'molecule-key-with-$-and-quotes-"-no-provider-calls');
+            console.log('API, SPA, OAuth and environment decoding passed');
+      changed_when: false
+
+    - name: Exercise real Traefik IP allowlist from trusted and untrusted peers
+      community.docker.docker_container_exec:
+        container: "{{ item }}"
+        argv:
+          - node
+          - --input-type=module
+          - -e
+          - |
+            import assert from 'node:assert/strict';
+            import https from 'node:https';
+            const trusted = '{{ item }}' === 'cumora-molecule-trusted-client';
+            const request = (path, forwarded) => new Promise((resolve, reject) => {
+              // Test-only Traefik has its default self-signed certificate; production probes validate TLS.
+              const req = https.request({hostname: '10.247.98.2', port: 443, path,
+                rejectUnauthorized: false, headers: {host: 'work.example.test',
+                  'x-forwarded-for': forwarded, 'cf-connecting-ip': '203.0.113.10'}},
+                res => {res.resume(); res.on('end', () => resolve(res.statusCode));});
+              req.on('error', reject); req.end();
+            });
+            const paths = ['/', '/api/health', '/api/auth/start/github', '/runtime/inbox', '/ws'];
+            for (const path of paths) {
+              assert.equal(await request(path, '203.0.113.99'), 403, 'non-allowlisted client: ' + path);
+              if (!trusted) {
+                assert.equal(await request(path, '203.0.113.10'), 403, 'untrusted peer with forged headers: ' + path);
+              }
+            }
+            if (trusted) {
+              assert.equal(await request('/', '203.0.113.10'), 200);
+              assert.equal(await request('/api/health', '198.51.100.20'), 200);
+              assert.equal(await request('/api/auth/me', '203.0.113.10'), 401);
+              assert.equal(await request('/api/auth/start/github', '203.0.113.10'), 302);
+              assert.equal(await request('/', '203.0.113.10, 203.0.113.99'), 403, 'use rightmost XFF');
+            }
+            console.log('Traefik allow/deny and spoofing boundary passed');
+      loop:
+        - cumora-molecule-trusted-client
+        - cumora-molecule-untrusted-client
+      register: cumora_test_allowlist
+      until: cumora_test_allowlist is succeeded
+      retries: 10
+      delay: 2
+      changed_when: false
+
+    - name: Verify real migration ledger, pgvector and closed registration policy
+      community.docker.docker_container_exec:
+        container: "{{ cumora_postgres_container_name }}"
+        argv:
+          - psql
+          - -U
+          - cumora
+          - -d
+          - cumora
+          - -v
+          - ON_ERROR_STOP=1
+          - -qAt
+          - -c
+          - >-
+            SELECT (SELECT COUNT(*) > 0 FROM schema_migrations)
+              AND EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector')
+              AND EXISTS (SELECT 1 FROM app_settings WHERE key = 'waitlist_enabled' AND value = 'true'::jsonb);
+      register: cumora_test_database
+      changed_when: false
+
+    - name: Assert schema and signup policy are ready before traffic
+      ansible.builtin.assert:
+        that: cumora_test_database.stdout | trim == 't'
+
+    - name: Save a persistence sentinel in uploads
+      community.docker.docker_container_exec:
+        container: "{{ cumora_server_container_name }}"
+        argv: [node, -e, "require('fs').writeFileSync('/app/server/uploads/molecule-sentinel', 'persistent')"]
+      changed_when: true
+
+    - name: Restart all test services
+      community.docker.docker_compose_v2:
+        project_src: "{{ cumora_stack_dir }}"
+        state: restarted
+        services: [postgres, redis, server]
+      no_log: true
+
+    # Compose restart 不支持 --wait；另用 up --wait 等待数据库和应用真正就绪。
+    - name: Wait for health after restart
+      community.docker.docker_compose_v2:
+        project_src: "{{ cumora_stack_dir }}"
+        state: present
+        services: [postgres, redis, server]
+        wait: true
+        wait_timeout: 180
+        pull: never
+      no_log: true
+
+    - name: Verify PostgreSQL and uploads persist across restart
+      community.docker.docker_container_exec:
+        container: "{{ cumora_server_container_name }}"
+        argv:
+          - node
+          - --input-type=module
+          - -e
+          - |
+            import assert from 'node:assert/strict';
+            import {readFileSync} from 'node:fs';
+            assert.equal(readFileSync('/app/server/uploads/molecule-sentinel', 'utf8'), 'persistent');
+            const r = await fetch('http://127.0.0.1:5181/api/public/signup-config');
+            assert.equal((await r.json()).waitlist_enabled, true);
+      changed_when: false
+
+    - name: Capture running server identity before a failing candidate migration
+      community.docker.docker_container_info:
+        name: "{{ cumora_server_container_name }}"
+      register: cumora_test_baseline
+      no_log: true
+
+    - name: Verify migration failure stops the candidate without replacing the server
+      block:
+        - name: Attempt to deploy an image without npm as a failing migration candidate
+          ansible.builtin.include_role:
+            name: cumora
+          vars:
+            cumora_image: redis:7.2.16-alpine3.21
+
+        - name: Fail if the invalid migration unexpectedly succeeds
+          ansible.builtin.fail:
+            msg: The invalid candidate must fail before server replacement.
+      rescue:
+        - name: Assert failure came from the migration command
+          ansible.builtin.assert:
+            that:
+              - ansible_failed_task.name == 'Run the candidate image migration and fail on nonzero exit'
+
+        - name: Inspect server after failed migration
+          community.docker.docker_container_info:
+            name: "{{ cumora_server_container_name }}"
+          register: cumora_test_after_failure
+          no_log: true
+
+        - name: Read successful migration stamp after failure
+          ansible.builtin.slurp:
+            src: "{{ cumora_migration_stamp_path }}"
+          register: cumora_test_stamp
+
+        - name: Assert failed migration did not replace the server or overwrite the success stamp
+          ansible.builtin.assert:
+            that:
+              - cumora_test_after_failure.container.Id == cumora_test_baseline.container.Id
+              - cumora_test_after_failure.container.State.Health.Status == 'healthy'
+              - cumora_test_stamp.content | b64decode | trim == cumora_image
+          no_log: true
+
+    - name: Retry the valid image after the failed deployment
+      ansible.builtin.include_role:
+        name: cumora

@@ -37,6 +37,24 @@ jobs:
       - name: Run ansible-lint
         run: ansible-lint
 
+  molecule-cumora:
+    name: Cumora Molecule
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install test dependencies and collections
+        run: |
+          pip install -r requirements.txt
+          ansible-galaxy install -r requirements.yml
+      - name: Run real isolated Cumora Compose scenario
+        env:
+          ANSIBLE_VAULT_PASSWORD_FILE: /dev/null
+        run: molecule test -s cumora
+
   syntax-check:
     name: Syntax Check
     runs-on: ubuntu-latest

@@ -51,7 +51,11 @@ run = "ansible-playbook -i inventory/prod/hosts.yml playbooks/site.yml"
 
 [tasks.test]
 description = "Run Molecule tests"
-run = "molecule test"
+run = ".venv/bin/molecule test"
+
+[tasks.test-cumora]
+description = "Run the isolated Cumora Compose Molecule scenario"
+run = ".venv/bin/molecule test -s cumora"
 
 [tasks.vault-encrypt]
 description = "Encrypt vault.yml"
