@@ -13,7 +13,7 @@
 - **反向代理**：Traefik v3 提供自动化 HTTPS (Let's Encrypt DNS-01 Challenge)
 - **密码管理**：Vaultwarden 1.37.2 自托管密码库
 - **AI API 网关**：Sub2API 0.2.4 (PostgreSQL + Redis)，Traefik 自动 HTTPS
-- **AI 团队协作**：Cumora 自有 fork 构建 GHCR 镜像，GitHub OAuth 登录，入口 IP 白名单
+- **AI 团队协作**：Cumora 自有 fork 构建 GHCR 镜像，公网 HTTPS 访问、GitHub OAuth 登录，非管理员新用户进入 waitlist
 - **GitOps Ready**：PR 只跑 CI；自动部署仅接受通过 CI 且仍为 `main` 最新提交的版本，Ansible Vault 保护敏感数据
 
 ## 快速开始
@@ -69,7 +69,7 @@ mise run deploy
 # 运行默认 Molecule 测试
 mise run test
 
-# 运行 Cumora 定向测试（实际 Compose、迁移、持久化、Traefik IP 白名单）
+# 运行 Cumora 定向测试（实际 Compose、迁移、持久化、入口与注册策略）
 mise run test-cumora
 
 # 编辑 Vault 文件
@@ -120,7 +120,7 @@ mise run vault-edit
 | `docker_custom` | 创建共享 Docker 网络 `proxy_net`，供多个服务共用 |
 | `traefik` | Traefik v3 反向代理，支持 HTTPS (Let's Encrypt DNS-01)，带 Basic Auth 保护的 Dashboard |
 | `sub2api` | Sub2API AI API 网关，三容器接入 proxy_net，数据库/缓存不暴露端口，密钥全部 Vault 管理 |
-| `cumora` | Cumora 团队协作，单 origin work.<domain>，GitHub OAuth + IP 白名单，独立数据库网络；非管理员新用户进入 waitlist |
+| `cumora` | Cumora 团队协作，单 origin work.<domain>，不限制客户端 IP，GitHub OAuth 登录，独立数据库网络；非管理员新用户进入 waitlist |
 | `multica` | 已卸载且主入口注释禁用；保留实现和旧数据，不自动重新部署 |
 | `vaultwarden` | Vaultwarden 密码管理器，禁用公开注册，通过 Admin Token 管理 |
 
@@ -139,7 +139,7 @@ mise run vault-edit
 - uv (Python 包管理)
 - Molecule + Docker (测试框架，使用 Debian 13 容器)
 
-Cumora 的 OAuth App 注册、镜像升级、访问白名单和回退说明见 [Cumora 运维手册](docs/runbooks/cumora.md)。
+Cumora 的 OAuth App 注册、镜像升级、访问策略和回退说明见 [Cumora 运维手册](docs/runbooks/cumora.md)。
 
 ## 许可证
 

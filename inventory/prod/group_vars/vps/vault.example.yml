@@ -49,10 +49,8 @@ vault_cumora_agent_runtime_secret: "CHANGEME"  # openssl rand -hex 32
 vault_cumora_openai_api_key: "byoa-only-no-cloud-provider"
 vault_cumora_github_client_id: "CHANGEME"
 vault_cumora_github_client_secret: "CHANGEME"
-# GitHub OAuth 返回的已验证邮箱；管理员不受 waitlist 限制。
+# GitHub OAuth 返回的已验证主邮箱，可能不同于公开资料邮箱；管理员不受 waitlist 限制。
 vault_cumora_admin_emails: ["owner@example.com"]
-# 公网出口 IP，不是本机 LAN 地址；IPv6 出口需要另行声明。
-vault_cumora_allowed_ips: ["203.0.113.10/32", "198.51.100.20/32"]
 
 # Multica secrets (服务已卸载，仅为旧数据回退保留)
 # postgres 密码 (openssl rand -hex 32, hex 字符避免 DATABASE_URL 转义问题)

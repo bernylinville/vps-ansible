@@ -105,7 +105,7 @@ sudo tar xzf /tmp/cumora-uploads-restore.tar.gz -C /opt/stacks/cumora
 sudo rm -f /opt/stacks/cumora/.migrated-image
 ```
 
-确认 Ansible 中的镜像 digest 与恢复方案一致，再执行 Cumora 部署。部署后从允许的代理出口请求 `GET https://work.<YOUR_DOMAIN>/api/health`，预期 `200` 且 JSON `ok: true`；保留证书校验，并验证登录和附件。确认恢复成功后再清理本次生成的旧附件目录，勿用通配符批量删除历史备份。
+确认 Ansible 中的镜像 digest 与恢复方案一致，再执行 Cumora 部署。部署后从普通公网出口请求 `GET https://work.<YOUR_DOMAIN>/api/health`，预期 `200` 且 JSON `ok: true`；保留证书校验，并验证登录和附件。确认恢复成功后再清理本次生成的旧附件目录，勿用通配符批量删除历史备份。
 
 已卸载的 Multica 仅保留旧数据；如需恢复，先停止 Cumora，按 [Multica 手册](multica.md) 恢复，避免同域名路由冲突。
 

@@ -33,7 +33,6 @@ provisioner:
         vault_cumora_github_client_id: molecule-client-id
         vault_cumora_github_client_secret: molecule-client-secret
         vault_cumora_admin_emails: [admin@example.test]
-        vault_cumora_allowed_ips: [203.0.113.10/32, 198.51.100.20/32]
         traefik_websecure_forwarded_trusted_ips: [10.247.98.3/32]
         cumora_waitlist_enabled: true
   playbooks:

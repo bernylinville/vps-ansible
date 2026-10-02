@@ -75,6 +75,38 @@
             console.log('API, SPA, OAuth and environment decoding passed');
       changed_when: false
 
+    - name: Verify bootstrap admin bypasses an existing waitlist entry while other signups remain gated
+      community.docker.docker_container_exec:
+        container: "{{ cumora_server_container_name }}"
+        argv:
+          - node
+          - --import
+          - tsx
+          - --input-type=module
+          - -e
+          - |
+            import assert from 'node:assert/strict';
+            import {enqueueWaitlist, isAllowlistedAdmin} from './server/src/admin.ts';
+            import {findOrCreateUserByProfile, WaitlistedError} from './server/src/oauth.ts';
+            import {pool} from './server/src/db/pool.ts';
+            // Simulate the verified profile returned by OAuth; never contact GitHub or use real credentials.
+            const admin = {providerId: 'molecule-admin', email: 'admin@example.test', displayName: 'Test admin', avatarUrl: null};
+            const outsider = {providerId: 'molecule-outsider', email: 'outsider@example.test', displayName: 'Test outsider', avatarUrl: null};
+            await enqueueWaitlist({provider: 'github', ...admin});
+            assert.equal(isAllowlistedAdmin(admin.email), true);
+            const admitted = await findOrCreateUserByProfile('github', admin);
+            const {rows} = await pool.query('SELECT is_admin FROM users WHERE id = $1', [admitted.userId]);
+            assert.equal(rows[0].is_admin, true);
+            assert.ok(admitted.companyId);
+            assert.equal(isAllowlistedAdmin(outsider.email), false);
+            await assert.rejects(findOrCreateUserByProfile('github', outsider), WaitlistedError);
+            const pending = await pool.query('SELECT status FROM waitlist WHERE email = $1', [outsider.email]);
+            assert.equal(pending.rows[0].status, 'pending');
+            await pool.end();
+            console.log('Bootstrap admin admitted despite existing waitlist; other new users remain pending');
+            process.exit(0);
+      changed_when: true
+
     - name: Create and read an actual PNG attachment in the isolated uploads volume
       community.docker.docker_container_exec:
         container: "{{ cumora_server_container_name }}"
@@ -94,7 +126,7 @@
             assert.deepEqual(Buffer.from(await response.arrayBuffer()), png);
       changed_when: true
 
-    - name: Exercise real Traefik cache policy and IP allowlist from trusted and untrusted peers
+    - name: Exercise public client access, cache policy and Cloudflare-only origin protection
       community.docker.docker_container_exec:
         container: "{{ item }}"
         argv:
@@ -132,11 +164,14 @@
               const bundle = await request(assetPath, '203.0.113.10');
               assert.equal(bundle.status, 200);
               assert.match(bundle.headers['content-type'], /javascript/);
-              assert.equal((await request(assetPath, '203.0.113.99')).status, 403);
+              assert.equal((await request(assetPath, '203.0.113.99')).status, 200);
               assert.equal((await request('/api/health', '198.51.100.20')).status, 200);
               assert.equal((await request('/api/auth/me', '203.0.113.10')).status, 401);
               assert.equal((await request('/api/auth/start/github', '203.0.113.10')).status, 302);
-              assert.equal((await request('/', '203.0.113.10, 203.0.113.99')).status, 403, 'use rightmost XFF');
+              for (const client of ['203.0.113.99', '2001:db8::42', '', '203.0.113.10, 203.0.113.99']) {
+                assert.equal((await request('/', client)).status, 200, 'any client via Cloudflare');
+                assert.equal((await request('/api/auth/me', client)).status, 401, 'IP access is not authentication');
+              }
               const image = await request(attachment, '203.0.113.10');
               assert.equal(image.status, 200);
               assert.match(image.headers['content-type'], /^image\/png/);
@@ -157,18 +192,18 @@
               assert.equal((await request('/uploads/attachments/molecule-missing.png', '203.0.113.10')).status, 404);
             }
             const paths = ['/', '/api/health', '/api/auth/start/github', '/runtime/inbox', '/ws', attachment, attachment + '?download=1'];
-            for (const path of paths) {
-              assert.equal((await request(path, '203.0.113.99')).status, 403, 'non-allowlisted client: ' + path);
-              if (!trusted) {
+            if (!trusted) {
+              for (const path of paths) {
+                assert.equal((await request(path, '203.0.113.99')).status, 403, 'direct-origin request: ' + path);
                 assert.equal((await request(path, '203.0.113.10')).status, 403, 'untrusted peer with forged headers: ' + path);
               }
             }
-            console.log('Traefik no-store, attachment bytes, allow/deny and spoofing boundary passed');
+            console.log('Public client access, authentication, no-store and Cloudflare-only origin boundary passed');
       loop:
         - cumora-molecule-trusted-client
         - cumora-molecule-untrusted-client
-      register: cumora_test_allowlist
-      until: cumora_test_allowlist is succeeded
+      register: cumora_test_ingress
+      until: cumora_test_ingress is succeeded
       retries: 10
       delay: 2
       changed_when: false
@@ -468,19 +503,29 @@
           - cumora_test_dependency_baseline_stamp.content | b64decode | trim == cumora_image
       no_log: true
 
-    - name: Disable only the isolated Redis healthcheck executable
+    - name: Make only the isolated Redis healthcheck return failure
       community.docker.docker_container_exec:
         container: "{{ cumora_redis_container_name }}"
-        argv: [mv, /usr/local/bin/redis-cli, /usr/local/bin/redis-cli.molecule-disabled]
+        argv:
+          - sh
+          - -ec
+          - |
+            mv /usr/local/bin/redis-cli /usr/local/bin/redis-cli.molecule-disabled
+            printf '#!/bin/sh\nexit 1\n' > /usr/local/bin/redis-cli
+            chmod +x /usr/local/bin/redis-cli
       changed_when: true
 
     - name: Verify a dependency timeout stops the changed same-image deployment
       block:
-        - name: Restart only Redis to reset its health status
-          community.docker.docker_compose_v2:
-            project_src: "{{ cumora_stack_dir }}"
-            services: [redis]
-            state: restarted
+        # Establish the fault before testing Compose: a restart or an exec-start
+        # error does not prove that Docker has marked the dependency unhealthy.
+        - name: Wait until Docker reports the isolated Redis as unhealthy
+          community.docker.docker_container_info:
+            name: "{{ cumora_redis_container_name }}"
+          register: cumora_test_unhealthy_redis
+          until: cumora_test_unhealthy_redis.container.State.Health.Status == 'unhealthy'
+          retries: 30
+          delay: 5
           no_log: true
 
         - name: Attempt the password change while Redis cannot pass its healthcheck
