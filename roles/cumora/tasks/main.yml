@@ -11,10 +11,6 @@
       - cumora_github_client_secret | length > 0
       - cumora_github_client_id is not match('CHANGEME|TO_FILL|YOUR_')
       - cumora_github_client_secret is not match('CHANGEME|TO_FILL|YOUR_')
-      - cumora_allowed_ips is sequence
-      - cumora_allowed_ips is not string
-      - cumora_allowed_ips is not mapping
-      - cumora_allowed_ips | length > 0
       - cumora_ingress_proxy_ips | length > 0
       - cumora_admin_emails is sequence
       - cumora_admin_emails is not string
@@ -23,7 +19,7 @@
       - cumora_postgres_user is match('^[a-z][a-z0-9_]*$')
       - cumora_postgres_db is match('^[a-z][a-z0-9_]*$')
       - cumora_image is not match('.*:(latest|main)$')
-    fail_msg: Cumora 需要固定镜像、随机密钥、GitHub OAuth、管理员邮箱和非空 IP 白名单。
+    fail_msg: Cumora 需要固定镜像、随机密钥、GitHub OAuth、管理员邮箱和 Cloudflare 源站入口网段。
   no_log: true
 
 - name: Create cumora stack directories

@@ -23,9 +23,8 @@ cumora_hostname: "{{ cumora_subdomain }}.{{ domain_name | default('example.com',
 cumora_public_origin: "https://{{ cumora_hostname }}"
 cumora_network_name: "{{ docker_custom_network_name }}"
 cumora_internal_network_name: cumora_internal
-# 两层入口校验：直连必须来自 Cloudflare，再取其 XFF 最右端客户端 IP。
+# 源站只接受 Cloudflare 转发；不限制最终客户端的公网 IP。
 cumora_ingress_proxy_ips: "{{ traefik_websecure_forwarded_trusted_ips | default([]) }}"
-cumora_allowed_ips: "{{ vault_cumora_allowed_ips }}"
 cumora_tz: "{{ timezone | default('UTC', true) }}"
 
 cumora_postgres_user: cumora

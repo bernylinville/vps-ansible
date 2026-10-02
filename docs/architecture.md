@@ -35,7 +35,7 @@ Internet
                 │
                 ├── vault.<YOUR_DOMAIN> → Vaultwarden
                 ├── api.<YOUR_DOMAIN> → Sub2API (AI API 网关)
-                ├── work.<YOUR_DOMAIN> → Cumora (同源 SPA/API/WebSocket，IP 白名单)
+                ├── work.<YOUR_DOMAIN> → Cumora (同源 SPA/API/WebSocket，不限制客户端 IP)
                 ├── panel.<YOUR_DOMAIN> → Traefik Dashboard (Basic Auth 保护)
                 └── *.<YOUR_DOMAIN> → (未来服务)
                 │
@@ -56,7 +56,7 @@ Internet
 | docker_custom | Custom Role | 创建共享 Docker 网络 proxy_net |
 | traefik | Custom Role | 反向代理、自动 HTTPS、路由发现 |
 | sub2api | Custom Role | AI API 网关（Sub2API + PostgreSQL + Redis） |
-| cumora | Custom Role | AI 团队协作（GHCR 单镜像 + pgvector PostgreSQL 18 + Redis），GitHub OAuth 与 IP 白名单 |
+| cumora | Custom Role | AI 团队协作（GHCR 单镜像 + pgvector PostgreSQL 18 + Redis），GitHub OAuth 与注册 waitlist |
 | vaultwarden | Custom Role | 密码库服务部署 |
 
 ### 证书管理
@@ -82,7 +82,7 @@ Internet
 2. **主机层**：SSH 密钥认证、非标准端口、Fail2ban
 3. **容器层**：Docker 网络隔离、最小权限原则
 4. **密钥层**：Ansible Vault 加密、GitHub Secrets 管理
-5. **Cumora 入口**：先校验连接来源属于 Cloudflare，再以 X-Forwarded-For 最右端 IP 校验用户白名单；Traefik 只信任 Cloudflare 网段的转发头，阻断直连源站和伪造头
+5. **Cumora 入口**：客户端公网 IP 不受限制；源站仅接受 Cloudflare 转发，阻断直连 VPS。GitHub OAuth 与注册 waitlist 属于应用层控制；上游公开附件链接不进行逐请求登录校验
 
 ## 部署流程
 
@@ -143,10 +143,10 @@ Internet
 4. **AI 团队协作**：`cumora`
    - 源码 fork：`bernylinville/cumora`；GitHub Actions 使用上游 Dockerfile 构建前端 + API 镜像，发布 `ghcr.io/bernylinville/cumora-server`；Ansible 固定 digest，不在 VPS 构建源码
    - 单 origin `https://work.<YOUR_DOMAIN>`：页面、`/api/`、`/runtime/`、uploads 与 WebSocket 统一走 server 的 5181 端口
-   - Cumora router 在两层 IPAllowList 外统一覆盖 `Cache-Control: private, no-store`，防止附件及静态响应被边缘缓存后绕过白名单；Cloudflare 不得忽略该策略，已有缓存须清理
+   - Cumora router 仅保留 Cloudflare 源站保护，不限制最终客户端 IP；统一覆盖 `Cache-Control: private, no-store`，避免附件及静态响应被缓存。禁止缓存不等于授权，已知附件链接仍遵循上游公开读取行为
    - PostgreSQL 18.6 / pgvector 0.8.6 与 Redis 7.2.16 仅接专用 internal 网络；只有 server 接 proxy_net，所有容器均不发布宿主端口
    - 先启动数据库和 Redis，用候选镜像执行一次 `npm run migrate`；成功后记录镜像并启动 server，失败不替换旧 server；应用启动仅校验 schema
-   - GitHub OAuth 凭据、PostgreSQL 密码、runtime 签名密钥、管理员邮箱及 IP 白名单由 Vault 管理；非管理员新用户进入 waitlist
+   - GitHub OAuth 凭据、PostgreSQL 密码、runtime 签名密钥和管理员邮箱由 Vault 管理；管理员按 OAuth 返回的已验证主邮箱匹配，非管理员新用户进入 waitlist
    - 仅提供 Compose 服务和 BYOA 接入，不提供依赖 Kubernetes 的云端 agent Pods；默认无云端 LLM 凭据
    - 数据持久化：`/opt/stacks/cumora/{postgres,uploads}`；PG18 挂载 `/var/lib/postgresql` 父目录，Redis 不持久化
    - Multica 已卸载，`site.yml` 中的 role 入口注释禁用；旧配置和数据保留用于回退，原 `work` 域名改由 Cumora 使用
@@ -166,7 +166,7 @@ Developer
                     ├── yamllint
                     ├── ansible-lint
                     ├── syntax-check
-                    └── Cumora Molecule (真实 Compose、迁移、持久化、Traefik IP 白名单)
+                    └── Cumora Molecule (真实 Compose、迁移、持久化、入口与注册策略)
                     │
                     └── ✅ Pass → Merge to main
                             │
