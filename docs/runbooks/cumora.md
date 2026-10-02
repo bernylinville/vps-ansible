@@ -18,6 +18,20 @@ Cumora 使用自有 fork `bernylinville/cumora` 构建的 GHCR 镜像。单个 s
 
 VPS 不编译源码。镜像不包含 `.env`；运行配置由 Ansible 渲染，真实凭据只存放在加密 Vault 和 VPS 上权限 `0600` 的 `.env`。
 
+## 定时检查与升级 PR
+
+更新分两次 PR 完成，不自动合并、不直接把上游代码部署到 VPS：
+
+1. 源码 fork 的 `Check Cumora Upstream` 每日 01:17 UTC 检查 `yetone/cumora:main`。有新提交时，创建上游到 fork 的同步 PR；没有更新时不操作。必须使用 **Create a merge commit** 合并上游 PR，保留提交祖先关系和 fork 独有的 GHCR workflow，不使用 `gh repo sync --force`。
+2. 本仓库的 `.github/workflows/check-cumora-image.yml` 每日 03:47 UTC 检查源码 fork 当前 `main` 是否已有成功的 `Self-host GHCR Image` 构建。未构建成功时不更新；成功后匿名读取对应 `sha-<完整提交>` 的 GHCR manifest，核对内容 digest 和 linux/amd64 平台，只修改 `roles/cumora/defaults/main.yml` 的不可变镜像引用。
+3. digest 有变化时，由 `peter-evans/create-pull-request` 在 `automation/cumora-image` 分支创建或更新升级 PR。正常 CI 包含实际 Molecule；检查变更和备份后，再合并。`main` CI 成功才会启动既有 CD。关闭注册、管理员邮箱、OAuth、网络和镜像版本以外的变量不会被更新脚本修改。
+
+两个检查 workflow 都支持 `workflow_dispatch`，需要立即检查时可手动触发；它们只检查并提出 PR，不是直接发布或部署入口。当前 `main` 的镜像与声明一致时不会创建空 PR。自动 PR 表示待审核候选，不保证数据库可以只靠回退镜像恢复；有迁移时按 [备份与恢复手册](backup-restore.md) 先备份 PostgreSQL 和 uploads。
+
+无需新增 PAT：两个仓库各自使用本仓库的 `GITHUB_TOKEN`。仓库 Actions 设置需启用 **Allow GitHub Actions to create and approve pull requests**；本自动化不调用审批或合并接口。GitHub 当前会把该 token 创建/更新的 PR 所触发的 CI 标为需要批准，维护者须先点击 **Approve workflows to run**，确认检查实际通过后再合并；没有检查结果或尚未批准不等于通过。规则见 [GitHub workflow 触发说明](https://docs.github.com/en/actions/how-tos/writing-workflows/choosing-when-your-workflow-runs/triggering-a-workflow#triggering-a-workflow-from-a-workflow)。若要求完全无人值守地触发 CI，需要另行配置最小权限 GitHub App；不要把本机 `gh` 的个人登录 token 复制进 Actions。
+
+检查 workflow 不读取生产 Vault、不使用 SSH 凭据、不运行生产 Playbook。脚本测试覆盖无更新、有更新、已有同步 PR、构建未成功、镜像 digest/平台错误及声明异常等情况。
+
 ## GitHub OAuth 和首个管理员
 
 GitHub 的公开 API 和 `gh` 不支持直接注册 OAuth App。注册需要在 GitHub 网页完成；注册后的运行变量由 Ansible 管理。

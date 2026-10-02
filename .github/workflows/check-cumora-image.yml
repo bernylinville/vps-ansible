@@ -1,0 +1,77 @@
+name: Check Cumora Image
+
+on:
+  schedule:
+    - cron: '47 3 * * *'
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/check-cumora-image.yml
+      - .github/scripts/check-cumora-image*.cjs
+
+permissions:
+  contents: read
+
+concurrency:
+  group: check-cumora-image-${{ github.event_name == 'pull_request' && github.ref || 'propose' }}
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    name: Resolve published Cumora image (read-only)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/github-script@v9
+        with:
+          script: |
+            const checkImage = require('./.github/scripts/check-cumora-image.cjs');
+            await checkImage({github, core});
+
+  propose:
+    if: github.repository == 'bernylinville/vps-ansible' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Resolve the successfully published source main image
+        id: candidate
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const checkImage = require('./.github/scripts/check-cumora-image.cjs');
+            await checkImage({github, core});
+      - name: Propose an immutable image update
+        if: steps.candidate.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@v8
+        with:
+          branch: automation/cumora-image
+          base: main
+          add-paths: roles/cumora/defaults/main.yml
+          commit-message: 'chore: update cumora image digest'
+          title: 'chore: update Cumora image digest'
+          body: |
+            Update only the Cumora image declaration from a successful source main build.
+
+            - Source: https://github.com/bernylinville/cumora/commit/${{ steps.candidate.outputs.source_sha }}
+            - Build: ${{ steps.candidate.outputs.build_url }}
+            - Image: `${{ steps.candidate.outputs.image }}`
+
+            Approve the bot-triggered workflows if GitHub requests it, then wait for CI including Molecule.
+            Review upstream migrations and back up PostgreSQL/uploads before merging an application upgrade.
+            This workflow never approves or merges the PR and has no production SSH/Vault credentials.
+            After a human merges it, successful main CI triggers the existing production deployment.

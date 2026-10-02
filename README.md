@@ -15,6 +15,7 @@
 - **AI API 网关**：Sub2API 0.2.4 (PostgreSQL + Redis)，Traefik 自动 HTTPS
 - **AI 团队协作**：Cumora 自有 fork 构建 GHCR 镜像，公网 HTTPS 访问、GitHub OAuth 登录，非管理员新用户进入 waitlist
 - **GitOps Ready**：PR 只跑 CI；自动部署仅接受通过 CI 且仍为 `main` 最新提交的版本，Ansible Vault 保护敏感数据
+- **更新检查**：定时提出 Cumora 上游同步与镜像 digest 升级 PR，审核和 CI 通过后再合并，不自动覆盖生产
 
 ## 快速开始
 
