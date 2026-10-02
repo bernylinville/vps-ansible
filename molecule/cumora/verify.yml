@@ -503,19 +503,29 @@
           - cumora_test_dependency_baseline_stamp.content | b64decode | trim == cumora_image
       no_log: true
 
-    - name: Disable only the isolated Redis healthcheck executable
+    - name: Make only the isolated Redis healthcheck return failure
       community.docker.docker_container_exec:
         container: "{{ cumora_redis_container_name }}"
-        argv: [mv, /usr/local/bin/redis-cli, /usr/local/bin/redis-cli.molecule-disabled]
+        argv:
+          - sh
+          - -ec
+          - |
+            mv /usr/local/bin/redis-cli /usr/local/bin/redis-cli.molecule-disabled
+            printf '#!/bin/sh\nexit 1\n' > /usr/local/bin/redis-cli
+            chmod +x /usr/local/bin/redis-cli
       changed_when: true
 
     - name: Verify a dependency timeout stops the changed same-image deployment
       block:
-        - name: Restart only Redis to reset its health status
-          community.docker.docker_compose_v2:
-            project_src: "{{ cumora_stack_dir }}"
-            services: [redis]
-            state: restarted
+        # Establish the fault before testing Compose: a restart or an exec-start
+        # error does not prove that Docker has marked the dependency unhealthy.
+        - name: Wait until Docker reports the isolated Redis as unhealthy
+          community.docker.docker_container_info:
+            name: "{{ cumora_redis_container_name }}"
+          register: cumora_test_unhealthy_redis
+          until: cumora_test_unhealthy_redis.container.State.Health.Status == 'unhealthy'
+          retries: 30
+          delay: 5
           no_log: true
 
         - name: Attempt the password change while Redis cannot pass its healthcheck
