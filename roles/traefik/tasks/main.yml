@@ -21,12 +21,16 @@
     src: .env.j2
     dest: "{{ traefik_env_path }}"
     mode: "0600"
+  no_log: true
+  diff: false
 
 - name: Render Traefik dynamic middlewares file
   ansible.builtin.template:
     src: middlewares.yml.j2
     dest: "{{ traefik_middlewares_path }}"
     mode: "0600"
+  no_log: true
+  diff: false
 
 - name: Render Traefik compose file
   ansible.builtin.template:
@@ -41,3 +45,4 @@
       - "{{ traefik_compose_path }}"
     state: present
     pull: "{{ traefik_image_pull_policy | default('always', true) }}"
+  no_log: true

@@ -5,6 +5,10 @@ platforms:
   - name: localhost
 provisioner:
   name: ansible
+  env:
+    # 独立场景不依赖本机或 CI 的生产 Vault/sudo 密码文件。
+    ANSIBLE_VAULT_PASSWORD_FILE: "${MOLECULE_SCENARIO_DIRECTORY}/test-password.txt"
+    ANSIBLE_BECOME_PASSWORD_FILE: "${MOLECULE_SCENARIO_DIRECTORY}/test-password.txt"
   config_options:
     defaults:
       roles_path: "${MOLECULE_PROJECT_DIRECTORY}/roles"

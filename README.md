@@ -14,7 +14,7 @@
 - **密码管理**：Vaultwarden 1.37.2 自托管密码库
 - **AI API 网关**：Sub2API 0.2.4 (PostgreSQL + Redis)，Traefik 自动 HTTPS
 - **AI 团队协作**：Cumora 自有 fork 构建 GHCR 镜像，GitHub OAuth 登录，入口 IP 白名单
-- **GitOps Ready**：GitHub Actions 自动部署，Ansible Vault 保护敏感数据
+- **GitOps Ready**：PR 只跑 CI；合并后 `main` CI 成功才触发真实部署，Ansible Vault 保护敏感数据
 
 ## 快速开始
 

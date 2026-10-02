@@ -9,9 +9,9 @@ vps-ansible 采用 Ansible-first 的声明式基础设施管理，通过 GitOps 
 ```
 GitHub Repo (vps-ansible)
     │
-    ├── GitHub Actions CI (lint + syntax-check)
+    ├── GitHub Actions CI (PR / main push：lint + syntax-check + Cumora Molecule)
     │
-    └── GitHub Actions Deploy (workflow_dispatch / push main)
+    └── GitHub Actions Deploy (main CI 成功 / main 手动触发)
             │
             └── SSH (port <YOUR_SSH_PORT>) → VPS (<YOUR_VPS_IP>)
                     │
@@ -169,7 +169,7 @@ Developer
                     │
                     └── ✅ Pass → Merge to main
                             │
-                            └── GitHub Actions Deploy
+                            └── main CI 成功 → GitHub Actions Deploy (检出 CI 的 head_sha)
                                     ├── 安装 Ansible
                                     ├── 配置 SSH 密钥
                                     ├── 解密 Vault

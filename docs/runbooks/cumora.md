@@ -12,7 +12,7 @@ Cumora 使用自有 fork `bernylinville/cumora` 构建的 GHCR 镜像。单个 s
 2. CI 通过后合并到 fork 的 `main`，由 GitHub Actions 发布 `ghcr.io/bernylinville/cumora-server`。
 3. 首次发布后确认 GHCR package 为 Public，执行匿名 pull 验证。不要将本机 GitHub token 复制到 VPS。
 4. 将 workflow summary 中的不可变 `@sha256:...` 引用写入 `roles/cumora/defaults/main.yml` 的 `cumora_image`，并同步 Molecule 的 `cumora_default_test_image`。
-5. 在基础设施仓库运行 lint、语法检查、Molecule 和生产 check，通过 PR 合并触发部署 workflow。
+5. 在基础设施仓库运行 lint、语法检查、Molecule 和生产 check，通过 PR 合并到 `main`。`main` 的 CI 成功后触发部署 workflow，检出该次 CI 的 `head_sha`，使用生产 inventory 真正运行 Playbook（不带 `--check`）。功能分支 / PR 只跑 CI，不连接 VPS；手动部署入口仅允许 `main`。
 
 VPS 不编译源码。镜像不包含 `.env`；运行配置由 Ansible 渲染，真实凭据只存放在加密 Vault 和 VPS 上权限 `0600` 的 `.env`。
 
