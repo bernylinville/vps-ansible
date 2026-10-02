@@ -47,6 +47,8 @@ Traefik 的 `forwardedHeaders.trustedIPs` 仅信任已有 Cloudflare 网段。�
 
 角色先等待数据库和 Redis 健康，然后使用候选镜像运行一次迁移。只有成功才写 `.migrated-image` 标记并启动 server；迁移失败会中止，保留已运行的旧 server，重试仍会执行迁移。配置、镜像或依赖容器变化时也会重新迁移。server 启动只校验 schema，不执行 DDL。
 
+配置变更或写入失败时，角色在依赖操作前使匹配候选镜像的旧标记失效；依赖变更或准备失败（包括健康等待超时）也会使该标记失效。配置与依赖阶段的 `always` 清理不接管原始错误，失败仍会中止部署。不同镜像的旧成功标记保留；同镜像失败后，即使原参数重试时配置和依赖均未变化，也必须重新迁移。check mode 不删除标记，无变化的成功部署仍保持幂等。
+
 `app_settings.waitlist_enabled` 在数据库中管理，不是环境变量。角色在服务上线前写入声明的策略；默认 `cumora_waitlist_enabled: true`。对已创建的用户，此策略不会撤销访问权限。
 
 ```bash
@@ -60,7 +62,7 @@ check mode 不执行迁移或数据库写入。首次 check 不落盘配置，�
 
 ## 验证
 
-Molecule 使用独立的本机 Docker 网络、容器名和 `/tmp/vps-ansible-cumora-molecule`，不读取生产 Vault。场景覆盖首次 check、真实数据库迁移、幂等、API/SPA/OAuth 入口、真实 Traefik IP 允许/拒绝和伪造头、持久化、迁移失败不替换旧服务、失败后重试。
+Molecule 使用独立的本机 Docker 网络、容器名和 `/tmp/vps-ansible-cumora-molecule`，不读取生产 Vault。场景覆盖首次 check、真实数据库迁移、幂等、API/SPA/OAuth 入口、真实 Traefik IP 允许/拒绝和伪造头、持久化、迁移失败不替换旧服务、失败后重试。迁移前失败回归还覆盖配置未变时 Docker 不可达、`.env` 已写入后 Compose 渲染失败，以及依赖健康等待超时后原参数重试。超时夹具只临时禁用隔离 Redis 容器中的健康检查程序，并在 `always` 中恢复，不修改生产配置。
 
 create 和 verify 使用 `import_role` 公开 Cumora 默认值，并以 `when: false` 跳过角色任务，避免在这两个阶段意外部署。默认值保留 role defaults 优先级，不覆盖测试 inventory 的目录、容器名和网络配置；verify 中用于失败保护的任务级镜像覆盖仍然生效。
 

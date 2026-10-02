@@ -43,46 +43,6 @@
     state: directory
     mode: "0711"
 
-- name: Render cumora environment file
-  ansible.builtin.template:
-    src: .env.j2
-    dest: "{{ cumora_env_path }}"
-    mode: "0600"
-  register: cumora_env_result
-  no_log: true
-  diff: false
-
-- name: Render cumora compose file
-  ansible.builtin.template:
-    src: compose.yml.j2
-    dest: "{{ cumora_compose_path }}"
-    mode: "0644"
-  register: cumora_compose_result
-  diff: false
-
-- name: Check cumora compose file exists
-  ansible.builtin.stat:
-    path: "{{ cumora_compose_path }}"
-  register: cumora_compose_stat
-
-- name: Explain check-mode skip on fresh host
-  ansible.builtin.debug:
-    msg: 首次 check mode 不落盘 Compose，跳过编排；迁移和数据库写入仅在真实部署执行。
-  when: ansible_check_mode and not cumora_compose_stat.stat.exists
-
-- name: Start cumora database and Redis before migration
-  community.docker.docker_compose_v2:
-    project_src: "{{ cumora_stack_dir }}"
-    files: ["{{ cumora_compose_path }}"]
-    services: [postgres, redis]
-    state: present
-    pull: "{{ cumora_image_pull_policy }}"
-    wait: true
-    wait_timeout: "{{ cumora_wait_timeout }}"
-  register: cumora_dependencies_result
-  when: not ansible_check_mode or cumora_compose_stat.stat.exists
-  no_log: true
-
 - name: Check last successful cumora migration image
   ansible.builtin.stat:
     path: "{{ cumora_migration_stamp_path }}"
@@ -94,6 +54,72 @@
   register: cumora_migration_stamp
   when: cumora_migration_stamp_stat.stat.exists
 
+- name: Prepare cumora configuration before dependencies
+  block:
+    - name: Render cumora environment file
+      ansible.builtin.template:
+        src: .env.j2
+        dest: "{{ cumora_env_path }}"
+        mode: "0600"
+      register: cumora_env_result
+      no_log: true
+      diff: false
+
+    - name: Render cumora compose file
+      ansible.builtin.template:
+        src: compose.yml.j2
+        dest: "{{ cumora_compose_path }}"
+        mode: "0644"
+      register: cumora_compose_result
+      diff: false
+  always:
+    - name: Invalidate the matching cumora migration stamp after configuration changes or failure
+      ansible.builtin.file:
+        path: "{{ cumora_migration_stamp_path }}"
+        state: absent
+      when:
+        - not ansible_check_mode
+        - cumora_migration_stamp_stat.stat.exists
+        - (cumora_migration_stamp.content | default('') | b64decode | trim) == cumora_image
+        - >-
+          cumora_env_result is changed or cumora_env_result is failed or
+          cumora_compose_result is changed or cumora_compose_result is failed
+
+- name: Check cumora compose file exists
+  ansible.builtin.stat:
+    path: "{{ cumora_compose_path }}"
+  register: cumora_compose_stat
+
+- name: Explain check-mode skip on fresh host
+  ansible.builtin.debug:
+    msg: 首次 check mode 不落盘 Compose，跳过编排；迁移和数据库写入仅在真实部署执行。
+  when: ansible_check_mode and not cumora_compose_stat.stat.exists
+
+- name: Prepare cumora dependencies before migration
+  block:
+    - name: Start cumora database and Redis before migration
+      community.docker.docker_compose_v2:
+        project_src: "{{ cumora_stack_dir }}"
+        files: ["{{ cumora_compose_path }}"]
+        services: [postgres, redis]
+        state: present
+        pull: "{{ cumora_image_pull_policy }}"
+        wait: true
+        wait_timeout: "{{ cumora_wait_timeout }}"
+      register: cumora_dependencies_result
+      when: not ansible_check_mode or cumora_compose_stat.stat.exists
+      no_log: true
+  always:
+    - name: Invalidate the matching cumora migration stamp after dependency changes or failure
+      ansible.builtin.file:
+        path: "{{ cumora_migration_stamp_path }}"
+        state: absent
+      when:
+        - not ansible_check_mode
+        - cumora_migration_stamp_stat.stat.exists
+        - (cumora_migration_stamp.content | default('') | b64decode | trim) == cumora_image
+        - cumora_dependencies_result is changed or cumora_dependencies_result is failed
+
 # 仅在成功后写标记；失败后重跑仍会迁移，不能依赖 template.changed 作为唯一条件。
 - name: Migrate cumora schema before starting the candidate server
   when:
@@ -104,14 +130,6 @@
       cumora_env_result is changed or cumora_compose_result is changed or
       cumora_dependencies_result is changed
   block:
-    - name: Invalidate the matching cumora migration stamp before running the candidate
-      ansible.builtin.file:
-        path: "{{ cumora_migration_stamp_path }}"
-        state: absent
-      when:
-        - cumora_migration_stamp_stat.stat.exists
-        - (cumora_migration_stamp.content | default('') | b64decode | trim) == cumora_image
-
     - name: Run the candidate image migration and fail on nonzero exit
       community.docker.docker_compose_v2_run:
         project_src: "{{ cumora_stack_dir }}"

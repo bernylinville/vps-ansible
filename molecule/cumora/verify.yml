@@ -325,3 +325,212 @@
           - cumora_test_same_image_recovered.container.Config.Image == cumora_image
           - cumora_test_same_image_recovered_stamp.content | b64decode | trim == cumora_image
       no_log: true
+
+    - name: Verify a dependency failure invalidates the stamp even without configuration changes
+      block:
+        - name: Attempt unchanged configuration against an unavailable test Docker socket
+          ansible.builtin.include_role:
+            name: cumora
+            apply:
+              environment:
+                DOCKER_HOST: "unix://{{ cumora_stack_dir }}/unavailable-docker.sock"
+
+        - name: Fail if the unavailable Docker socket unexpectedly succeeds
+          ansible.builtin.fail:
+            msg: Dependency preparation must fail with an unavailable Docker socket.
+      rescue:
+        - name: Assert the unchanged deployment failed during dependency preparation
+          ansible.builtin.assert:
+            that:
+              - ansible_failed_task.name == 'Start cumora database and Redis before migration'
+              - cumora_env_result is not changed
+              - cumora_compose_result is not changed
+              - cumora_dependencies_result is failed
+
+        - name: Check the stamp after dependency failure without configuration changes
+          ansible.builtin.stat:
+            path: "{{ cumora_migration_stamp_path }}"
+          register: cumora_test_unchanged_dependency_stamp
+
+        - name: Assert dependency failure alone invalidated the matching stamp
+          ansible.builtin.assert:
+            that: not cumora_test_unchanged_dependency_stamp.stat.exists
+
+    - name: Recover using the available Docker socket and unchanged configuration
+      ansible.builtin.include_role:
+        name: cumora
+
+    - name: Verify a Compose render failure invalidates an already written environment change
+      block:
+        - name: Attempt a password change with an undefined Compose network
+          ansible.builtin.include_role:
+            name: cumora
+          vars:
+            cumora_postgres_password: "{{ cumora_test_invalid_postgres_password }}"
+            cumora_network_name: "{{ undef('Intentional Molecule Compose rendering failure') }}"
+
+        - name: Fail if the undefined Compose network unexpectedly succeeds
+          ansible.builtin.fail:
+            msg: Compose rendering must fail after the environment change.
+      rescue:
+        - name: Assert the environment was written before Compose rendering failed
+          ansible.builtin.assert:
+            that:
+              - ansible_failed_task.name == 'Render cumora compose file'
+              - cumora_env_result is changed
+
+        - name: Check the stamp after the Compose rendering failure
+          ansible.builtin.stat:
+            path: "{{ cumora_migration_stamp_path }}"
+          register: cumora_test_compose_failure_stamp
+
+        - name: Assert the failed configuration phase invalidated the matching stamp
+          ansible.builtin.assert:
+            that: not cumora_test_compose_failure_stamp.stat.exists
+
+    - name: Restore valid configuration after the Compose rendering failure
+      ansible.builtin.include_role:
+        name: cumora
+
+    - name: Capture the healthy server before the dependency timeout
+      community.docker.docker_container_info:
+        name: "{{ cumora_server_container_name }}"
+      register: cumora_test_dependency_baseline
+      no_log: true
+
+    - name: Read the successful stamp before the dependency timeout
+      ansible.builtin.slurp:
+        src: "{{ cumora_migration_stamp_path }}"
+      register: cumora_test_dependency_baseline_stamp
+
+    - name: Assert the dependency-timeout baseline is healthy and successfully migrated
+      ansible.builtin.assert:
+        that:
+          - cumora_test_dependency_baseline.container.State.Health.Status == 'healthy'
+          - cumora_test_dependency_baseline.container.Config.Image == cumora_image
+          - cumora_test_dependency_baseline_stamp.content | b64decode | trim == cumora_image
+      no_log: true
+
+    - name: Disable only the isolated Redis healthcheck executable
+      community.docker.docker_container_exec:
+        container: "{{ cumora_redis_container_name }}"
+        argv: [mv, /usr/local/bin/redis-cli, /usr/local/bin/redis-cli.molecule-disabled]
+      changed_when: true
+
+    - name: Verify a dependency timeout stops the changed same-image deployment
+      block:
+        - name: Restart only Redis to reset its health status
+          community.docker.docker_compose_v2:
+            project_src: "{{ cumora_stack_dir }}"
+            services: [redis]
+            state: restarted
+          no_log: true
+
+        - name: Attempt the password change while Redis cannot pass its healthcheck
+          ansible.builtin.include_role:
+            name: cumora
+          vars:
+            cumora_postgres_password: "{{ cumora_test_invalid_postgres_password }}"
+            cumora_wait_timeout: 2
+
+        - name: Fail if unhealthy dependencies unexpectedly pass preparation
+          ansible.builtin.fail:
+            msg: Dependency preparation must time out before migration or server replacement.
+      rescue:
+        - name: Assert the changed deployment failed at the original dependency task
+          ansible.builtin.assert:
+            that:
+              - ansible_failed_task.name == 'Start cumora database and Redis before migration'
+              - cumora_env_result is changed
+              - cumora_compose_result is not changed
+              - cumora_dependencies_result is failed
+
+        - name: Check the stamp immediately after the dependency timeout
+          ansible.builtin.stat:
+            path: "{{ cumora_migration_stamp_path }}"
+          register: cumora_test_dependency_failed_stamp
+
+        - name: Assert the dependency timeout left no matching success stamp
+          ansible.builtin.assert:
+            that: not cumora_test_dependency_failed_stamp.stat.exists
+      always:
+        - name: Restore the isolated Redis healthcheck executable
+          community.docker.docker_container_exec:
+            container: "{{ cumora_redis_container_name }}"
+            argv: [mv, /usr/local/bin/redis-cli.molecule-disabled, /usr/local/bin/redis-cli]
+          changed_when: true
+
+    - name: Wait for dependencies to recover without changing the candidate configuration
+      community.docker.docker_container_info:
+        name: "{{ item }}"
+      loop:
+        - "{{ cumora_postgres_container_name }}"
+        - "{{ cumora_redis_container_name }}"
+      register: cumora_test_dependency_health
+      until: cumora_test_dependency_health.exists and cumora_test_dependency_health.container.State.Health.Status == 'healthy'
+      retries: 30
+      delay: 2
+      no_log: true
+
+    - name: Verify the identical deployment retries migration after the dependency timeout
+      block:
+        - name: Retry the same password and timeout after dependency recovery
+          ansible.builtin.include_role:
+            name: cumora
+          vars:
+            cumora_postgres_password: "{{ cumora_test_invalid_postgres_password }}"
+            cumora_wait_timeout: 2
+
+        - name: Fail if the retry unexpectedly bypasses the invalid password
+          ansible.builtin.fail:
+            msg: The recovered dependencies must not allow migration to be skipped.
+      rescue:
+        - name: Assert the retry reached migration without configuration or dependency changes
+          ansible.builtin.assert:
+            that:
+              - ansible_failed_task.name == 'Run the candidate image migration and fail on nonzero exit'
+              - cumora_env_result is not changed
+              - cumora_compose_result is not changed
+              - cumora_dependencies_result is not changed
+
+    - name: Inspect the server after retrying the timed-out deployment
+      community.docker.docker_container_info:
+        name: "{{ cumora_server_container_name }}"
+      register: cumora_test_dependency_retry_server
+      no_log: true
+
+    - name: Check the stamp after retrying the timed-out deployment
+      ansible.builtin.stat:
+        path: "{{ cumora_migration_stamp_path }}"
+      register: cumora_test_dependency_retry_stamp
+
+    - name: Assert the dependency timeout and failed retry preserved the healthy server
+      ansible.builtin.assert:
+        that:
+          - cumora_test_dependency_retry_server.container.Id == cumora_test_dependency_baseline.container.Id
+          - cumora_test_dependency_retry_server.container.State.Health.Status == 'healthy'
+          - not cumora_test_dependency_retry_stamp.stat.exists
+      no_log: true
+
+    - name: Restore the correct password after the dependency-timeout regression
+      ansible.builtin.include_role:
+        name: cumora
+
+    - name: Inspect the recovered server after the dependency-timeout regression
+      community.docker.docker_container_info:
+        name: "{{ cumora_server_container_name }}"
+      register: cumora_test_dependency_recovered_server
+      no_log: true
+
+    - name: Read the successful migration stamp after dependency-timeout recovery
+      ansible.builtin.slurp:
+        src: "{{ cumora_migration_stamp_path }}"
+      register: cumora_test_dependency_recovered_stamp
+
+    - name: Assert dependency-timeout recovery restored health and the successful stamp
+      ansible.builtin.assert:
+        that:
+          - cumora_test_dependency_recovered_server.container.State.Health.Status == 'healthy'
+          - cumora_test_dependency_recovered_server.container.Config.Image == cumora_image
+          - cumora_test_dependency_recovered_stamp.content | b64decode | trim == cumora_image
+      no_log: true
