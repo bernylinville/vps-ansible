@@ -22,7 +22,7 @@ provisioner:
         cumora_project_name: cumora-molecule
         cumora_image: "{{ lookup('env', 'CUMORA_TEST_IMAGE') | default(cumora_default_test_image, true) }}"
         # 更新为与 role 相同的不可变 GHCR 镜像；本地可用 CUMORA_TEST_IMAGE 覆盖。
-        cumora_default_test_image: ghcr.io/bernylinville/cumora-server:sha-d0dbf160be6533535cf482cc9e6e9f96eb957c3f
+        cumora_default_test_image: ghcr.io/bernylinville/cumora-server@sha256:fd6be73fcfe7fe5be26c001608711aff6fc29b135f0f0d6b75a934319cd1a717
         cumora_server_container_name: cumora-molecule-server
         cumora_postgres_container_name: cumora-molecule-postgres
         cumora_redis_container_name: cumora-molecule-redis

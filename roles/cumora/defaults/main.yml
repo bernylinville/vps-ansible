@@ -10,7 +10,7 @@ cumora_uploads_dir: "{{ cumora_stack_dir }}/uploads"
 cumora_migration_stamp_path: "{{ cumora_stack_dir }}/.migrated-image"
 
 # 生产和 CI 均使用公开 GHCR 镜像；部署固定 digest，不跟随 main/latest。
-cumora_image: ghcr.io/bernylinville/cumora-server:sha-d0dbf160be6533535cf482cc9e6e9f96eb957c3f
+cumora_image: ghcr.io/bernylinville/cumora-server@sha256:fd6be73fcfe7fe5be26c001608711aff6fc29b135f0f0d6b75a934319cd1a717
 cumora_postgres_image: pgvector/pgvector:pg18@sha256:2ba9ca5f2e7daa0f0e7723cba1ee9167bab54efd3640516a44ac1a928dd67e7a
 cumora_redis_image: redis:7.2.16-alpine3.21
 cumora_image_pull_policy: missing
