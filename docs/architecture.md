@@ -153,6 +153,8 @@ Internet
 
 ## GitOps 工作流
 
+Cumora 更新检查与部署分离：源码 fork 定时提出上游同步 PR，合并后发布 SHA-tagged GHCR 镜像；本仓库每日检查源码 `main` 的成功构建，并提出固定 digest 的升级 PR。检查任务只使用各自仓库的 `GITHUB_TOKEN`，不自动审批或合并。机器人 PR 的 CI 若处于 approval-required，需先批准运行；升级 PR 通过 Molecule 后，由维护者确认迁移与备份再合并，继续使用下方 `main` CI → CD 流程。具体时间、权限和操作见 [Cumora 手册](runbooks/cumora.md#定时检查与升级-pr)。
+
 ```
 Developer
     │
