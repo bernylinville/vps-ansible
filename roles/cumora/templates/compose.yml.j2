@@ -86,7 +86,8 @@ services:
       traefik.http.routers.cumora.tls.certresolver: letsencrypt
       traefik.http.routers.cumora.service: cumora
       # edge 使用连接来源，阻断直连源站；clients 使用可信 CF 的最右端 XFF。
-      traefik.http.routers.cumora.middlewares: cumora-edge,cumora-clients
+      traefik.http.routers.cumora.middlewares: cumora-no-store,cumora-edge,cumora-clients
+      traefik.http.middlewares.cumora-no-store.headers.customresponseheaders.Cache-Control: "private, no-store"
       traefik.http.middlewares.cumora-edge.ipallowlist.sourcerange: "{{ cumora_ingress_proxy_ips | join(',') }}"
       traefik.http.middlewares.cumora-clients.ipallowlist.sourcerange: "{{ cumora_allowed_ips | join(',') }}"
       traefik.http.middlewares.cumora-clients.ipallowlist.ipstrategy.depth: "1"

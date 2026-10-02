@@ -143,6 +143,7 @@ Internet
 4. **AI 团队协作**：`cumora`
    - 源码 fork：`bernylinville/cumora`；GitHub Actions 使用上游 Dockerfile 构建前端 + API 镜像，发布 `ghcr.io/bernylinville/cumora-server`；Ansible 固定 digest，不在 VPS 构建源码
    - 单 origin `https://work.<YOUR_DOMAIN>`：页面、`/api/`、`/runtime/`、uploads 与 WebSocket 统一走 server 的 5181 端口
+   - Cumora router 在两层 IPAllowList 外统一覆盖 `Cache-Control: private, no-store`，防止附件及静态响应被边缘缓存后绕过白名单；Cloudflare 不得忽略该策略，已有缓存须清理
    - PostgreSQL 18.6 / pgvector 0.8.6 与 Redis 7.2.16 仅接专用 internal 网络；只有 server 接 proxy_net，所有容器均不发布宿主端口
    - 先启动数据库和 Redis，用候选镜像执行一次 `npm run migrate`；成功后记录镜像并启动 server，失败不替换旧 server；应用启动仅校验 schema
    - GitHub OAuth 凭据、PostgreSQL 密码、runtime 签名密钥、管理员邮箱及 IP 白名单由 Vault 管理；非管理员新用户进入 waitlist
@@ -170,6 +171,7 @@ Developer
                     └── ✅ Pass → Merge to main
                             │
                             └── main CI 成功 → GitHub Actions Deploy (检出 CI 的 head_sha)
+                                    ├── queue: max 串行排队（最多 100 个 pending run）
                                     ├── 安装 Ansible
                                     ├── 确认 CI 的 head_sha 仍是 main 最新提交，否则中止
                                     ├── 配置 SSH 密钥

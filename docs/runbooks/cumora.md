@@ -14,6 +14,8 @@ Cumora 使用自有 fork `bernylinville/cumora` 构建的 GHCR 镜像。单个 s
 4. 将 workflow summary 中的不可变 `@sha256:...` 引用写入 `roles/cumora/defaults/main.yml` 的 `cumora_image`。Molecule 直接复用该默认值，不单独配置正常测试镜像。
 5. 在基础设施仓库运行 lint、语法检查、Molecule 和生产 check，通过 PR 合并到 `main`。`main` 的 CI 成功后触发部署 workflow，检出该次 CI 的 `head_sha`。自动部署取得并发锁后、准备 SSH 和生产凭据前，确认该 SHA 仍是远端 `main` 的最新提交；不一致或查询失败时中止，不改为检出未经 CI 验证的新提交。检查通过后，使用生产 inventory 真正运行 Playbook（不带 `--check`）。功能分支 / PR 只跑 CI，不连接 VPS；手动部署入口仍仅允许 `main`。
 
+部署并发组使用 `queue: max` 和 `cancel-in-progress: false`，串行执行并保留最多 100 个等待中的 run，避免晚到的旧 CI 取消已等待的新提交部署。队列满时新增 run 会被 GitHub 取消；取得锁后的 SHA 检查仍用于拒绝过期自动部署。队列行为以 [GitHub 官方并发文档](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency) 为准。
+
 VPS 不编译源码。镜像不包含 `.env`；运行配置由 Ansible 渲染，真实凭据只存放在加密 Vault 和 VPS 上权限 `0600` 的 `.env`。
 
 ## GitHub OAuth 和首个管理员
@@ -43,6 +45,10 @@ Traefik 的 `forwardedHeaders.trustedIPs` 仅信任已有 Cloudflare 网段。�
 
 拒绝请求返回 `403`，包括登录入口、API、uploads 和 WebSocket。浏览器发起 GitHub OAuth，GitHub 将浏览器重定向回 Cumora；GitHub 本身不需要加入访问白名单。BYOA 设备同样必须通过允许的出口连接。
 
+`cumora-no-store` 响应头 middleware 位于两层 IPAllowList 之前，将所有经过 Cumora router 的响应统一覆盖为 `Cache-Control: private, no-store`，包括 PNG 附件、前端静态资源、API、跳转和拒绝响应。这样，允许客户端读取过的附件也不会因边缘缓存命中而绕过源站白名单；Cumora 静态资源不使用 Cloudflare 缓存加速。
+
+Cloudflare 必须遵守源站的 `private, no-store`：不得为 Cumora 主机名配置忽略这些指令的 Edge Cache TTL、Cache Rules 或 Worker 缓存逻辑。参见 [Cloudflare 默认缓存行为](https://developers.cloudflare.com/cache/concepts/default-cache-behavior/)。本次是新实例首次部署，没有以前的 Cumora 附件边缘缓存；若将此策略用于已有实例，必须先清理该主机名对应的已有边缘缓存，再开放访问。新增响应头不能清除已经缓存的副本。
+
 ## 部署与迁移
 
 角色先等待数据库和 Redis 健康，然后使用候选镜像运行一次迁移。只有成功才写 `.migrated-image` 标记并启动 server；迁移失败会中止，保留已运行的旧 server，重试仍会执行迁移。配置、镜像或依赖容器变化时也会重新迁移。server 启动只校验 schema，不执行 DDL。
@@ -65,6 +71,10 @@ check mode 不执行迁移或数据库写入。首次 check 不落盘配置，�
 Molecule 使用独立的本机 Docker 网络、容器名和 `/tmp/vps-ansible-cumora-molecule`，不读取生产 Vault。场景覆盖首次 check、真实数据库迁移、幂等、API/SPA/OAuth 入口、真实 Traefik IP 允许/拒绝和伪造头、持久化、迁移失败不替换旧服务、失败后重试。迁移前失败回归还覆盖配置未变时 Docker 不可达、`.env` 已写入后 Compose 渲染失败，以及依赖健康等待超时后原参数重试。超时夹具只临时禁用隔离 Redis 容器中的健康检查程序，并在 `always` 中恢复，不修改生产配置。
 
 create 和 verify 使用 `import_role` 公开 Cumora 默认值，并以 `when: false` 跳过角色任务，避免在这两个阶段意外部署。默认值保留 role defaults 优先级，不覆盖测试 inventory 的目录、容器名和网络配置；verify 中用于失败保护的任务级镜像覆盖仍然生效。
+
+缓存回归在隔离 uploads 卷创建 PNG 附件，经真实 Traefik 检查附件字节、静态 JS、GET/HEAD/范围请求/条件请求的响应及 `private, no-store`，并验证非白名单和伪造来源仍被拒绝。本机场景不连接 Cloudflare，边缘缓存清理和缓存规则须在实际部署时另行核对。
+
+`actionlint 1.7.12` 尚不识别 GitHub 已支持的 `concurrency.queue` 键，可能仅对此报告 `unknown key`。这是该版本的有限兼容性问题，不应据此删除 `queue: max` 或忽略其他诊断；使用支持该字段的版本后再复核此项。
 
 部署后检查 `cumora-server`、`cumora-postgres`、`cumora-redis` 容器健康状态，确认数据库和 Redis 未接入 `proxy_net`，所有容器没有宿主端口映射。
 
